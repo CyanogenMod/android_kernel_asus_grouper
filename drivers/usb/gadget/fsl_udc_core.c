@@ -88,7 +88,7 @@ static struct usb_sys_interface *usb_sys_regs;
 /* it is initialized in probe()  */
 static struct fsl_udc *udc_controller = NULL;
 
-extern unsigned int grouper_query_pcba_revision();
+extern unsigned int grouper_query_pcba_revision(void);
 unsigned int pcb_id_version = 0;
 EXPORT_SYMBOL(pcb_id_version);
 

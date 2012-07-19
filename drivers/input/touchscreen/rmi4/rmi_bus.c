@@ -40,13 +40,13 @@ static int rmi_bus_match(struct device *dev, struct device_driver *driver)
 	pdata = to_rmi_platform_data(rmi_dev);
 
 	pr_info("        rmi_driver->driver.name =  %s\n", rmi_driver->driver.name);
-        pr_info("        device:rmi_device = 0x%x \n", rmi_dev);
+        pr_info("        device:rmi_device = 0x%x \n", (unsigned int)rmi_dev);
 	pr_info("             device:rmi_device:rmi_device_platform_data:driver_name = %s \n", pdata->driver_name);
-        pr_info("                    rmi_device:driver = 0x%x \n", rmi_dev->driver);
+        pr_info("                    rmi_device:driver = 0x%x \n", (unsigned int)rmi_dev->driver);
 
 	if (!strcmp(pdata->driver_name, rmi_driver->driver.name)) {
 		rmi_dev->driver = rmi_driver;
-		pr_info("             names match, so now rmi_device:driver = 0x%x \n",rmi_dev->driver);
+		pr_info("             names match, so now rmi_device:driver = 0x%x \n", (unsigned int)rmi_dev->driver);
 		return 1;
 	}
 	pr_info("             names DO NOT match, so return nothing \n");
@@ -152,8 +152,8 @@ int rmi_register_phys_device(struct rmi_phys_device *phys)
 
 	phys->rmi_dev = rmi_dev;
 	pr_info("                 registering physical device:\n");
-	pr_info("                 dev.init_name = \n", rmi_dev->dev.init_name);
-	pr_info("                 dev.bus->name = \n", rmi_dev->dev.bus->name);
+	pr_info("                 dev.init_name = %s\n", rmi_dev->dev.init_name);
+	pr_info("                 dev.bus->name = %s\n", rmi_dev->dev.bus->name);
 	return device_register(&rmi_dev->dev);
 }
 EXPORT_SYMBOL(rmi_register_phys_device);

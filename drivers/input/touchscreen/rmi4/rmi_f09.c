@@ -171,8 +171,8 @@ static void rmi_f09_remove(struct rmi_function_container *fc)
 {
 	struct rmi_fn_09_data *data = fc->data;
 	if (data) {
-		kfree(data->query.Limit_Register_Count);
-		kfree(data->query.f09_bist_query1);
+		kfree(&data->query.Limit_Register_Count);
+		kfree(&data->query.f09_bist_query1);
 	}
 	kfree(fc->data);
 }

@@ -851,7 +851,7 @@ static void grouper_nfc_init(void)
 	tegra_gpio_enable(TEGRA_GPIO_PS7);
 	tegra_gpio_enable(TEGRA_GPIO_PR3);
 }
-extern tegra_booting_info(void );
+extern void tegra_booting_info(void);
 static void __init tegra_grouper_init(void)
 {
 	tegra_thermal_init(&thermal_data);

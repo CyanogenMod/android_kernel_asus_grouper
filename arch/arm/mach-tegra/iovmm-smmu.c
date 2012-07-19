@@ -703,7 +703,7 @@ static void smmu_unmap(struct tegra_iovmm_domain *domain,
 }
 
 static void smmu_map_pfn(struct tegra_iovmm_domain *domain,
-	struct tegra_iovmm_area *iovma, tegra_iovmm_addr_t addr,
+	struct tegra_iovmm_area *iovma, unsigned long addr,
 	unsigned long pfn)
 {
 	struct smmu_as *as = container_of(domain, struct smmu_as, domain);

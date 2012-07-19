@@ -129,7 +129,7 @@ static int nct1008_get_temp(struct device *dev, long *pTemp)
 
 	/* Return max between Local and External Temp */
 	*pTemp = max(temp_local_milli, temp_ext_milli);
-	printk("%s: ret temp=%dC \n", __func__, MILLICELSIUS_TO_CELSIUS(*pTemp));
+	printk("%s: ret temp=%liC \n", __func__, MILLICELSIUS_TO_CELSIUS(*pTemp));
 	return 0;
 error:
 	dev_err(&client->dev, "\n error in file=: %s %s() line=%d: "

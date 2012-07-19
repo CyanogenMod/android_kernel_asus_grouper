@@ -525,11 +525,11 @@ static int acquire_attn_irq(struct rmi_spi_data *data)
         int retval = 0;
         pr_info("in function ____%s____  \n", __func__);
         pr_info("          irq = %d\n", data->irq);
-        pr_info("          rmi_spi_hard_irq          = 0x%8x\n", rmi_spi_hard_irq);
-        pr_info("          rmi_spi_irq_thread        = 0x%8x\n", rmi_spi_irq_thread);
+        pr_info("          rmi_spi_hard_irq          = 0x%8x\n", (unsigned int) rmi_spi_hard_irq);
+        pr_info("          rmi_spi_irq_thread        = 0x%8x\n", (unsigned int)rmi_spi_irq_thread);
         pr_info("          data->irq_flags           = 0x%8x\n", data->irq_flags);
         pr_info("          dev_name(data->phys->dev) = %s\n", dev_name(data->phys->dev));
-        pr_info("          data->phys                = 0x%8x\n", data->phys);
+        pr_info("          data->phys                = 0x%8x\n",(unsigned int) data->phys);
 
 	retval =  request_threaded_irq(data->irq, rmi_spi_hard_irq,
 			rmi_spi_irq_thread, data->irq_flags,

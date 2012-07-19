@@ -82,7 +82,7 @@ struct al3010_data {
 static int revise_lux_times = 2;
 static bool al3010_hardware_fail = false;
 
-static int al3010_update_calibration();
+static int al3010_update_calibration(void);
 static int al3010_chip_resume(struct al3010_data *data);
 /*
  * register access helpers
@@ -101,6 +101,7 @@ static int __al3010_write_reg(struct i2c_client *client,
 	struct al3010_data *data = i2c_get_clientdata(client);
 	int ret = 0;
 	u8 tmp;
+	int addr;
 
 	if (reg >= AL3010_NUM_CACHABLE_REGS)
 		return -EINVAL;
@@ -111,7 +112,7 @@ static int __al3010_write_reg(struct i2c_client *client,
 	tmp &= ~mask;
 	tmp |= val << shift;
 
-	int addr = al3010_reg[reg];
+	addr = al3010_reg[reg];
 	ret = i2c_smbus_write_byte_data(client, addr, tmp);
 	if (!ret)
 		data->reg_cache[reg] = tmp;
@@ -174,10 +175,11 @@ static int al3010_set_power_state(struct i2c_client *client, int state)
 static int al3010_get_power_state(struct i2c_client *client)
 {
 	struct al3010_data *data = i2c_get_clientdata(client);
+	u8 cmdreg;
 	//u8 cmdreg = data->reg_cache[AL3010_MODE_COMMAND];
 	// do not use cache data check power state , directly get register data from IC.
 	mutex_lock(&data->lock);
-	u8 cmdreg = i2c_smbus_read_byte_data(client, AL3010_MODE_COMMAND);
+	cmdreg = i2c_smbus_read_byte_data(client, AL3010_MODE_COMMAND);
 	mutex_unlock(&data->lock);
 	return (cmdreg & AL3010_POW_MASK) >> AL3010_POW_SHIFT;
 }
@@ -241,15 +243,17 @@ static int al3010_get_reg_value(struct i2c_client *client)
  * light sensor calibration
  */
 
-static int al3010_update_calibration()
+static int al3010_update_calibration(void)
 {
 	char buf[256];
 	int calibration_value = 0;
 	mm_segment_t oldfs;
+	struct file *fp = NULL;
+
 	oldfs=get_fs();
 	set_fs(get_ds());
 	memset(buf, 0, sizeof(u8)*256);
-	struct file *fp = NULL;
+
 	fp=filp_open(CAL_ALS_PATH, O_RDONLY, 0);
 	if (!IS_ERR(fp)) {
 		int ret = 0;
@@ -278,10 +282,11 @@ static ssize_t al3010_show_power_state(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+
 	if(al3010_hardware_fail==true){
 		return sprintf(buf, "%d\n", 0);
 	}
-	struct i2c_client *client = to_i2c_client(dev);
 	return sprintf(buf, "%d\n", al3010_get_power_state(client));
 }
 
@@ -322,11 +327,12 @@ static ssize_t al3010_refresh_calibration(struct device *dev,
 static ssize_t al3010_show_revise_lux(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+
 	//printk("light sensor al3010 show_revise_lux+\n");
 	if(al3010_hardware_fail==true){
 		return sprintf(buf, "%d\n", -1);
 	}
-	struct i2c_client *client = to_i2c_client(dev);
 
 	/* No LUX data if not operational */
 	if (al3010_get_power_state(client) != 0x01)
@@ -336,10 +342,12 @@ static ssize_t al3010_show_revise_lux(struct device *dev,
 		int require_wait_time = 200;//(ms)
 		struct timeval t_current_time;
 		int diff_time = 0;
+		int real_wait_time;
+
 		do_gettimeofday(&t_current_time);
 		diff_time = ( (t_current_time.tv_sec-t_poweron_timestamp.tv_sec)*1000000 + (t_current_time.tv_usec-t_poweron_timestamp.tv_usec) )/1000;
 		//printk("light sensor debug : first_get_lux_time - later_resume_time = %d ms \n",diff_time);
-		int real_wait_time = require_wait_time - diff_time;
+		real_wait_time = require_wait_time - diff_time;
 		if(real_wait_time>require_wait_time){
 			//printk("light sensor debug : first event wait time = %d\n",require_wait_time);
 			msleep(require_wait_time);
@@ -410,8 +418,8 @@ static int al3010_chip_resume(struct al3010_data *data)
 	/* restore registers from cache */
 	int ret=0;
 	if (al3010_get_power_state(data->client) == 0){
-	        mutex_lock(&data->lock);
 		int i=0;
+	        mutex_lock(&data->lock);
 		for (i = 0; i < ARRAY_SIZE(data->reg_cache); i++)
 			if (i2c_smbus_write_byte_data(data->client, i, data->reg_cache[i])){
 				mutex_unlock(&data->lock);
@@ -429,36 +437,38 @@ static int al3010_chip_resume(struct al3010_data *data)
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 
-static int al3010_early_suspend(struct early_suspend *h)
+static void al3010_early_suspend(struct early_suspend *h)
 {
+	int ret;
+	struct al3010_data *data = container_of(h, struct al3010_data, light_sensor_early_suspender);
+
 	if(al3010_hardware_fail==true){
 		printk("al3010_early_suspend\n");
-		return 0;
+		return;
 	}
 	printk("al3010_early_suspend+\n");
-	int ret = 0;
 	//+++
-	struct al3010_data *data = container_of(h, struct al3010_data, light_sensor_early_suspender);
 	ret = al3010_chip_suspend(data);
         //---
 	printk("al3010_early_suspend-\n");
-	return ret;
+	return;
 }
 
-static int al3010_late_resume(struct early_suspend *h)
+static void al3010_late_resume(struct early_suspend *h)
 {
+	int ret;
+	struct al3010_data *data = container_of(h, struct al3010_data, light_sensor_early_suspender);
+
 	if(al3010_hardware_fail==true){
 		printk("al3010_late_resume\n");
-		return 0;
+		return;
 	}
 	printk("al3010_late_resume+\n");
-	int ret=0;
 	//+++
-	struct al3010_data *data = container_of(h, struct al3010_data, light_sensor_early_suspender);
 	ret = al3010_chip_resume(data);
 	//---
 	printk("al3010_late_resume-\n");
-	return ret;
+	return;
 }
 #endif
 
@@ -501,7 +511,7 @@ int al3010_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-int al3010_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+long al3010_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int err = 1;
 
@@ -628,7 +638,7 @@ static int __devinit al3010_probe(struct i2c_client *client,
 	data->misc_dev.fops = &al3010_fops;
 	err = misc_register(&data->misc_dev);
 	if (err){
-		printk("light sensor err : Unable to register %s\misc device\n",
+		printk("light sensor err : Unable to register %s misc device\n",
 				data->misc_dev.name);
 		goto exit_kfree;
 	}
@@ -660,14 +670,14 @@ static int __devexit al3010_remove(struct i2c_client *client)
 #ifdef CONFIG_PM
 static int al3010_suspend(struct i2c_client *client, pm_message_t mesg)
 {
+	int ret = 0;
+	struct al3010_data *data = i2c_get_clientdata(client);
 	if(al3010_hardware_fail==true){
 		printk("al3010_suspend\n");
 		return 0;
 	}
 	printk("al3010_suspend+\n");
-	int ret = 0;
 	//+++
-	struct al3010_data *data = i2c_get_clientdata(client);
 	ret = al3010_chip_suspend(data);
 	//---
 	printk("al3010_suspend-\n");
@@ -676,14 +686,15 @@ static int al3010_suspend(struct i2c_client *client, pm_message_t mesg)
 
 static int al3010_resume(struct i2c_client *client)
 {
+	int ret=0;
+	struct al3010_data *data = i2c_get_clientdata(client);
+
 	if(al3010_hardware_fail==true){
 		printk("al3010_resume\n");
 		return 0;
 	}
 	printk("al3010_resume+\n");
-	int ret=0;
 	//+++
-	struct al3010_data *data = i2c_get_clientdata(client);
 	ret = al3010_chip_resume(data);
 	//---
 	printk("al3010_resume-\n");
@@ -715,9 +726,9 @@ static struct i2c_driver al3010_driver = {
 
 static int __init al3010_init(void)
 {
+	int ret = i2c_add_driver(&al3010_driver);
 	printk(KERN_INFO "%s+ #####\n", __func__);
 	printk("light sensor info : al3010 init \n");
-	int ret = i2c_add_driver(&al3010_driver);
 	printk(KERN_INFO "%s- #####\n", __func__);
 	return ret;
 }

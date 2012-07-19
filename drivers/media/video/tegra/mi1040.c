@@ -1005,7 +1005,7 @@ static ssize_t dbg_mi1040_chip_id_read(struct file *file, char __user *buf, size
 	u16 chip_id = 0x0;
 	int err = 0;
 
-	printk("%s: buf=%p, count=%d, ppos=%p; *ppos= %d\n", __FUNCTION__, buf, count, ppos, *ppos);
+	printk("%s: buf=%p, count=%d, ppos=%p; *ppos= %d\n", __FUNCTION__, buf, count, ppos, (int)*ppos);
 
 	if (*ppos)
 		return 0;	/* the end */
@@ -1055,8 +1055,7 @@ static ssize_t dbg_get_mi1040_reg_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t dbg_get_mi1040_reg_write(struct file *file, char __user *buf, size_t count,
-				loff_t *ppos)
+static ssize_t dbg_get_mi1040_reg_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	char debug_buf[256];
 	int cnt, byte_num = 0;
@@ -1096,9 +1095,9 @@ static ssize_t dbg_get_mi1040_reg_write(struct file *file, char __user *buf, siz
 			/* Write the Reg */
 			printk("Offset= %d(0x%x); byte_num= %d\n", ofst, ofst, byte_num);
 			if (byte_num == 1)
-				err = sensor_read_reg(info->i2c_client, ofst, &val);
+				err = sensor_read_reg(info->i2c_client, ofst, (u16 *)&val);
 			else if (byte_num == 2)
-				err = sensor_read_reg_word(info->i2c_client, ofst, &val);
+				err = sensor_read_reg_word(info->i2c_client, ofst, (u16 *)&val);
 			else if (byte_num == 4)
 				err = sensor_read_reg_dword(info->i2c_client, ofst, &val);
 			else {
@@ -1135,7 +1134,7 @@ static ssize_t dbg_set_mi1040_reg_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t dbg_set_mi1040_reg_write(struct file *file, char __user *buf, size_t count,
+static ssize_t dbg_set_mi1040_reg_write(struct file *file, const char __user *buf, size_t count,
 				loff_t *ppos)
 {
 	char debug_buf[256];
@@ -1432,7 +1431,7 @@ static long sensor_ioctl(struct file *file,
 			ev=1;
 		else if (val > 0x42)
 			ev=2;
-		if (copy_to_user((const void __user *)arg, &ev, sizeof(short))) {
+		if (copy_to_user((void __user *)arg, &ev, sizeof(short))) {
 			return -EFAULT;
 		}
 		if (err)
@@ -1465,7 +1464,7 @@ static long sensor_ioctl(struct file *file,
 		}else
 			printk("AELOCK Unknown State: 0x%x???\n", val);
 
-		if (copy_to_user((const void __user *)arg, &aelock, sizeof(u32)))
+		if (copy_to_user((void __user *)arg, &aelock, sizeof(u32)))
 		{
 			return -EFAULT;
 		}
@@ -1523,7 +1522,7 @@ static long sensor_ioctl(struct file *file,
 		}else
 			printk("AWBLOCK Unknown State???\n");
 
-		if (copy_to_user((const void __user *)arg, &awblock, sizeof(u32)))
+		if (copy_to_user((void __user *)arg, &awblock, sizeof(u32)))
 		{
 			return -EFAULT;
 		}

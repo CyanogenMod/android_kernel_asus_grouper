@@ -154,6 +154,8 @@ exit:
 static int __init lid_init(void)
 {
 	int err_code = 0;
+	int ret;
+
 	printk(KERN_INFO "%s+ #####\n", __func__);
 	LID_NOTICE("start LID init.....\n");
 
@@ -163,7 +165,7 @@ static int __init lid_init(void)
                 return -ENOMEM;
         }
 
-	sysfs_create_group((struct kobject*)&lid_dev->dev.kobj, &lid_attr_group);
+	ret = sysfs_create_group((struct kobject*)&lid_dev->dev.kobj, &lid_attr_group);
 
 	err_code = lid_input_device_create();
 	if(err_code != 0)

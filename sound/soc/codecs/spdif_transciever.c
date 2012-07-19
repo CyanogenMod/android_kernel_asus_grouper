@@ -45,7 +45,7 @@ static int spdif_write(struct snd_soc_codec * codec, unsigned int reg,
 	return 0;
 }
 
-static int spdif_read(struct snd_soc_codec * codec, unsigned int reg){
+static unsigned int spdif_read(struct snd_soc_codec * codec, unsigned int reg){
 	return 0;
 }
 

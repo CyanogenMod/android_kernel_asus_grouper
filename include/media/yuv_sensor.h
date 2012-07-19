@@ -19,10 +19,10 @@
 
 #define SENSOR_WAIT_MS          0 /* special number to indicate this is wait time require */
 #define SENSOR_TABLE_END        1 /* special number to indicate this is end of table */
-#define SENSOR_BYTE_WRITE       2
-#define SENSOR_WORD_WRITE       3
-#define SENSOR_MASK_BYTE_WRITE  4
-#define SENSOR_MASK_WORD_WRITE  5
+//#define SENSOR_BYTE_WRITE       2
+//#define SENSOR_WORD_WRITE       3
+//#define SENSOR_MASK_BYTE_WRITE  4
+//#define SENSOR_MASK_WORD_WRITE  5
 #define SEQ_WRITE_START         6
 #define SEQ_WRITE_END           7
 

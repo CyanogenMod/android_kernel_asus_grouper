@@ -2217,7 +2217,7 @@ int mmc_pm_notify(struct notifier_block *notify_block,
 	unsigned long flags;
 
 	printk("[mmc]mmc_pm_notify start\n");
-	MMC_printk("%s: mode %d, bus_resume_flags %d rescan_disable %d", mmc_hostname(host), mode, host->bus_resume_flags, host->rescan_disable); 
+	MMC_printk("%s: mode %li, bus_resume_flags %u rescan_disable %d", mmc_hostname(host), mode, host->bus_resume_flags, host->rescan_disable); 
 
 	switch (mode) {
 	case PM_HIBERNATION_PREPARE:
@@ -2245,7 +2245,7 @@ int mmc_pm_notify(struct notifier_block *notify_block,
 		mmc_power_off(host);
 		mmc_release_host(host);
 		host->pm_flags = 0;
-		MMC_printk("mode %d ended", mode);
+		MMC_printk("mode %li ended", mode);
 		break;
 
 	case PM_POST_SUSPEND:

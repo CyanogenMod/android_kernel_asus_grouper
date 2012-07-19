@@ -35,7 +35,7 @@ static struct rmi_f19_button_map synaptics_button_map = {
 	.map = synaptics_button_codes,
 };
 
-static int synaptics_touchpad_gpio_setup(void)
+static int synaptics_touchpad_gpio_setup(void *gpio_data, bool configure)
 {
 	tegra_gpio_enable(SYNAPTICS_ATTN_GPIO);
 	gpio_request(SYNAPTICS_ATTN_GPIO, "synaptics-irq");

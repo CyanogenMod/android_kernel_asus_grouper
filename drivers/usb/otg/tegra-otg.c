@@ -270,7 +270,7 @@ static irqreturn_t tegra_otg_irq(int irq, void *data)
 		}
 	} else {
 		if ((val & USB_ID_INT_STATUS) || (val & USB_VBUS_INT_STATUS)) {
-			printk(KERN_INFO "%s(): WRONG! val = %#X\n", __func__, val);
+			printk(KERN_INFO "%s(): WRONG! val = %#X\n", __func__, (unsigned int)val);
 			val |= (USB_VBUS_INT_EN | USB_VBUS_WAKEUP_EN);
 			val |= (USB_ID_INT_EN | USB_ID_PIN_WAKEUP_EN);
 			otg_writel(tegra, val, USB_PHY_WAKEUP);

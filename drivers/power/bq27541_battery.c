@@ -463,6 +463,7 @@ static int bq27541_get_psp(int reg_offset, enum power_supply_property psp,
 	s32 ret;
 	int smb_retry=0;
 	int rt_value=0;
+	static char *status_text[] = {"Unknown", "Charging", "Discharging", "Not charging", "Full"};
 
 	bq27541_device->smbus_status = bq27541_smbus_read_data(reg_offset, 0, &rt_value);
 
@@ -484,7 +485,6 @@ static int bq27541_get_psp(int reg_offset, enum power_supply_property psp,
 	}
 	if (psp == POWER_SUPPLY_PROP_STATUS) {
 		ret = bq27541_device->bat_status = rt_value;
-		static char *status_text[] = {"Unknown", "Charging", "Discharging", "Not charging", "Full"};
 
 		if (ac_on || usb_on) {            /* Charging detected */
 			if (bq27541_device->old_capacity == 100)
