@@ -28,6 +28,8 @@
 #include <linux/syscalls.h>
 #include <linux/highuid.h>
 
+#include "../../arch/arm/mach-tegra/pm.h"
+
 /*
  * dbs is used in this file as a shortform for demandbased switching
  * It helps to keep variable names smaller, simpler
@@ -660,7 +662,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		dbs_freq_increase(policy, policy->max);
 #else
 		if (counter < 5) {
-                        if (num_online_cpus() > 1)
+                        if (!is_lp_cluster())
                                 counter++;
                         else
                                 counter += 2;
@@ -674,7 +676,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			/* idle phase
                          * limit the frequency to max lpcpu if only 1 cpu is online
                          * this should avoid fast "peak"-switching out of lpcpu */
-                        if (num_online_cpus() > 1)
+                        if (!is_lp_cluster())
                                 dbs_freq_increase(policy, dbs_tuners_ins.two_phase_freq);
                         else
                                 dbs_freq_increase(policy, 475000);
