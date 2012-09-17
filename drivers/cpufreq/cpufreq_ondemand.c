@@ -668,8 +668,13 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		}
 		if (dbs_tuners_ins.two_phase_freq != 0 && phase == 0) {
 			debug_freq = dbs_tuners_ins.two_phase_freq;
-			/* idle phase */
-			dbs_freq_increase(policy, dbs_tuners_ins.two_phase_freq);
+			/* idle phase
+                         * limit the frequency to max lpcpu if only 1 cpu is online
+                         * this should avoid fast "peak"-switching out of lpcpu */
+                        if (num_online_cpus() > 1)
+                                dbs_freq_increase(policy, dbs_tuners_ins.two_phase_freq);
+                        else
+                                dbs_freq_increase(policy, 475000);
 		} else {
 			/* busy phase */
 			if (policy->cur < policy->max)
