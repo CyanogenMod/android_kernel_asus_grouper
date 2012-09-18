@@ -662,6 +662,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		dbs_freq_increase(policy, policy->max);
 #else
 		if (counter < 5) {
+                        /* avoid the lpcpu from slowing down the system */
                         if (!is_lp_cluster())
                                 counter++;
                         else
@@ -674,7 +675,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		if (dbs_tuners_ins.two_phase_freq != 0 && phase == 0) {
 			debug_freq = dbs_tuners_ins.two_phase_freq;
 			/* idle phase
-                         * limit the frequency to max lpcpu if only 1 cpu is online
+                         * limit the frequency to max lpcpu if lpcpu is online
                          * this should avoid fast "peak"-switching out of lpcpu */
                         if (!is_lp_cluster())
                                 dbs_freq_increase(policy, dbs_tuners_ins.two_phase_freq);
