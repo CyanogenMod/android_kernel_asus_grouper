@@ -687,8 +687,10 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
                          * this should avoid fast "peak"-switching out of lpcpu */
                         if (!is_lp_cluster())
                                 dbs_freq_increase(policy, dbs_tuners_ins.two_phase_freq);
-                        else
+                        else if ((cpufreq_governor_screen == true) && (is_lp_cluster()))
                                 dbs_freq_increase(policy, 475000);
+                        else if ((cpufreq_governor_screen == false) && (is_lp_cluster()))
+                                dbs_freq_increase(policy, 204000);
 		} else {
 			/* busy phase */
 			if (policy->cur < policy->max)
