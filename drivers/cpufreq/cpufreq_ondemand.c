@@ -27,6 +27,9 @@
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 #include <linux/highuid.h>
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
 
 #include "../../arch/arm/mach-tegra/pm.h"
 
@@ -71,6 +74,11 @@ static unsigned int def_sampling_rate;
 static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				unsigned int event);
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static struct early_suspend cpufreq_governor_early_suspend;
+static bool cpufreq_governor_screen = true;
+#endif
 
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
 static
@@ -1088,6 +1096,18 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	return 0;
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void cpufreq_governor_suspend(struct early_suspend *h)
+{
+	cpufreq_governor_screen = false;
+}
+
+static void cpufreq_governor_resume(struct early_suspend *h)
+{
+	cpufreq_governor_screen = true;
+}
+#endif
+
 static int __init cpufreq_gov_dbs_init(void)
 {
 	cputime64_t wall;
@@ -1113,6 +1133,16 @@ static int __init cpufreq_gov_dbs_init(void)
 			MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10);
 	}
 	def_sampling_rate = DEF_SAMPLING_RATE;
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	cpufreq_governor_screen = true;
+
+	cpufreq_governor_early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN;
+	cpufreq_governor_early_suspend.suspend = cpufreq_governor_suspend;
+	cpufreq_governor_early_suspend.resume = cpufreq_governor_resume;
+
+	register_early_suspend(&cpufreq_governor_early_suspend);
+#endif
 
 	return cpufreq_register_governor(&cpufreq_gov_ondemand);
 }
