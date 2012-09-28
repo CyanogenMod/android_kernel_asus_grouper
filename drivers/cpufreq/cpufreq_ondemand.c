@@ -81,6 +81,8 @@ static struct early_suspend cpufreq_governor_early_suspend;
 static bool cpufreq_governor_screen = true;
 #endif
 
+static unsigned int saved_powersave_bias = 0;
+
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
 static
 #endif
@@ -1160,11 +1162,14 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 static void cpufreq_governor_suspend(struct early_suspend *h)
 {
 	cpufreq_governor_screen = false;
+        saved_powersave_bias = dbs_tuners_ins.powersave_bias;
+        dbs_tuners_ins.powersave_bias = 200;
 }
 
 static void cpufreq_governor_resume(struct early_suspend *h)
 {
 	cpufreq_governor_screen = true;
+        dbs_tuners_ins.powersave_bias = saved_powersave_bias;
 }
 #endif
 
