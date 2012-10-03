@@ -1,0 +1,10 @@
+Change-Id: Ib5d0b1c0546218c891383ba8f808fe48488f6f71
+Code-Review+2: fattire <fattire@indirect.com>
+Verified+1: fattire <fattire@indirect.com>
+Code-Review+1: Paul Beeler <sparksco@gmail.com>
+Code-Review+1: Sam Mortimer <sam@mortimer.me.uk>
+Submitted-by: fattire <fattire@indirect.com>
+Submitted-at: Wed, 03 Oct 2012 13:46:16 -0700
+Reviewed-on: http://review.cyanogenmod.com/20875
+Project: CyanogenMod/android_kernel_asus_grouper
+Branch: refs/heads/jellybean
