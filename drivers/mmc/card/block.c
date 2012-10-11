@@ -697,6 +697,17 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 	unsigned int from, nr, arg;
 	int err = 0;
 
+	/*
+	 * The Nexus 7 ships with several emmc chips. The ext4 discard
+	 * mount option is required to prevent performance issues on
+	 * one chip, but hurts performance on others. However, if this
+	 * is a secure erase request, we want this to work on all chips,
+	 * as this is used in factory wipe. So this test will enable the
+	 * discard option for the one chip, and secure erase for all chips.
+	 */
+	if (!(req->cmd_flags & REQ_SECURE) && !(card->cid.manfid == 0x15))
+		goto out;
+
 	if (!mmc_can_erase(card)) {
 		err = -EOPNOTSUPP;
 		goto out;
@@ -705,7 +716,9 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 	from = blk_rq_pos(req);
 	nr = blk_rq_sectors(req);
 
-	if (mmc_can_trim(card))
+	if (mmc_can_discard(card))
+		arg = MMC_DISCARD_ARG;
+	else if (mmc_can_trim(card))
 		arg = MMC_TRIM_ARG;
 	else
 		arg = MMC_ERASE_ARG;
@@ -1216,10 +1229,7 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 		/* complete ongoing async transfer before issuing discard */
 		if (card->host->areq)
 			mmc_blk_issue_rw_rq(mq, NULL);
-		if (req->cmd_flags & REQ_SECURE) {
-			/* FIXME: Bypass secdiscard, waiting eMMC vendor update new FW. */
-			ret = mmc_blk_issue_discard_rq(mq, req);
-		}
+		ret = mmc_blk_issue_discard_rq(mq, req);
 	} else if (req && req->cmd_flags & REQ_FLUSH) {
 		/* complete ongoing async transfer before issuing flush */
 		if (card->host->areq)
