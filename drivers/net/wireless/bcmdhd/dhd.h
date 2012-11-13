@@ -24,7 +24,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h 333052 2012-05-12 02:09:28Z $
+ * $Id: dhd.h 344123 2012-07-11 09:33:49Z $
  */
 
 /****************
@@ -94,6 +94,8 @@ enum dhd_bus_state {
 
 #define DHD_BEACON_TIMEOUT_NORMAL	4
 #define DHD_BEACON_TIMEOUT_HIGH		10
+
+#define DYNAMIC_DTIM_SKIP 1
 
 enum dhd_bus_wake_state {
 	WAKE_LOCK_OFF,
@@ -235,6 +237,11 @@ typedef struct dhd_pub {
 #ifdef WLMEDIA_HTSF
 	uint8 htsfdlystat_sz; /* Size of delay stats, max 255B */
 #endif
+#ifdef DYNAMIC_DTIM_SKIP
+	ulong pre_rx_packets;
+	int   dynamic_dtim_skip;
+	int   dynamic_dtim_data_counter;
+#endif
 } dhd_pub_t;
 
 typedef struct dhd_cmn {
@@ -251,7 +258,7 @@ typedef struct dhd_cmn {
 			SMP_RD_BARRIER_DEPENDS(); \
 			while (dhd_mmc_suspend && retry++ != b) { \
 				SMP_RD_BARRIER_DEPENDS(); \
-				wait_event_interruptible_timeout(a, !dhd_mmc_suspend, HZ/100); \
+				wait_event_interruptible_timeout(a, !dhd_mmc_suspend, 1); \
 			} \
 		} while (0)
 	#define DHD_PM_RESUME_WAIT(a) 		_DHD_PM_RESUME_WAIT(a, 200)
@@ -263,7 +270,7 @@ typedef struct dhd_cmn {
 	#define SPINWAIT_SLEEP(a, exp, us) do { \
 		uint countdown = (us) + 9999; \
 		while ((exp) && (countdown >= 10000)) { \
-			wait_event_interruptible_timeout(a, FALSE, HZ/100); \
+			wait_event_interruptible_timeout(a, FALSE, 1); \
 			countdown -= 10000; \
 		} \
 	} while (0)
@@ -431,6 +438,9 @@ extern void dhd_os_sdunlock_sndup_rxq(dhd_pub_t * pub);
 extern void dhd_os_sdlock_eventq(dhd_pub_t * pub);
 extern void dhd_os_sdunlock_eventq(dhd_pub_t * pub);
 extern bool dhd_os_check_hang(dhd_pub_t *dhdp, int ifidx, int ret);
+extern int dhd_os_send_hang_message(dhd_pub_t *dhdp);
+extern int net_os_send_hang_message(struct net_device *dev);
+extern void dhd_set_version_info(dhd_pub_t *pub, char *fw);
 
 #ifdef PNO_SUPPORT
 extern int dhd_pno_enable(dhd_pub_t *dhd, int pfn_enabled);
@@ -520,6 +530,8 @@ extern int dhd_bus_membytes(dhd_pub_t *dhdp, bool set, uint32 address, uint8 *da
 extern void dhd_print_buf(void *pbuf, int len, int bytes_per_line);
 extern bool dhd_is_associated(dhd_pub_t *dhd, void *bss_buf, int *retval);
 extern uint dhd_bus_chip_id(dhd_pub_t *dhdp);
+extern uint dhd_bus_chiprev_id(dhd_pub_t *dhdp);
+extern uint dhd_bus_chippkg_id(dhd_pub_t *dhdp);
 
 #if defined(KEEP_ALIVE)
 extern int dhd_keep_alive_onoff(dhd_pub_t *dhd);
@@ -603,10 +615,26 @@ extern uint dhd_pktgen_len;
 #endif
 
 
+/* hooks for custom Roaming Trigger  setting via Makefile */
+#define DEFAULT_ROAM_TRIGGER_VALUE -75 /* dBm default roam trigger all band */
+#define DEFAULT_ROAM_TRIGGER_SETTING 	-1
+#ifndef CUSTOM_ROAM_TRIGGER_SETTING
+#define CUSTOM_ROAM_TRIGGER_SETTING 	DEFAULT_ROAM_TRIGGER_VALUE
+#endif
+
+/* hooks for custom Roaming Romaing  setting via Makefile */
+#define DEFAULT_ROAM_DELTA_VALUE  10 /* dBm default roam delta all band */
+#define DEFAULT_ROAM_DELTA_SETTING 	-1
+#ifndef CUSTOM_ROAM_DELTA_SETTING
+#define CUSTOM_ROAM_DELTA_SETTING 	DEFAULT_ROAM_DELTA_VALUE
+#endif
+
 /* optionally set by a module_param_string() */
 #define MOD_PARAM_PATHLEN	2048
 extern char fw_path[MOD_PARAM_PATHLEN];
 extern char nv_path[MOD_PARAM_PATHLEN];
+
+#define MOD_PARAM_INFOLEN	512
 
 #ifdef SOFTAP
 extern char fw_path2[MOD_PARAM_PATHLEN];

@@ -61,8 +61,6 @@
 #define STOP_COMMUNICATION 401
 #define START_COMMUNICATION 402
 
-#define DEPOP_DELAY (1)
-
 static int input_source=INPUT_SOURCE_NORMAL;
 static int output_source=OUTPUT_SOURCE_NORMAL;
 static int input_agc = INPUT_SOURCE_NO_AGC;
@@ -71,6 +69,7 @@ static int poll_rate = 0;
 static struct delayed_work poll_audio_work;
 static int count_base = 1;
 static int count_100 = 0;
+static int hp_amp_count = 0;
 #include "rt5640.h"
 #if defined(CONFIG_SND_SOC_RT5642_MODULE) || defined(CONFIG_SND_SOC_RT5642)
 #include "rt5640-dsp.h"
@@ -136,7 +135,7 @@ static struct rt5640_init_reg init_list[] = {
 	{RT5640_PRIV_INDEX	, 0x0091},
 	{RT5640_PRIV_DATA	, 0x1000},
 	{RT5640_STO_DAC_MIXER	, 0x0404},
-	{RT5640_LOUT_MIXER	, 0x3000},
+	{RT5640_LOUT_MIXER	, 0xc000},
 	{RT5640_I2S1_SDP	, 0xe000},
 	{RT5640_DSP_PATH2	, 0x0000},
 	{RT5640_PRIV_INDEX      , 0x006e},
@@ -270,8 +269,7 @@ static int rt5640_reg_init(struct snd_soc_codec *codec)
 
 	for (i = 0; i < RT5640_INIT_REG_LEN; i++)
 		snd_soc_write(codec, init_list[i].reg, init_list[i].val);
-	snd_soc_update_bits(codec, RT5640_HP_CALIB_AMP_DET,
-		RT5640_HPD_PS_MASK, RT5640_HPD_PS_EN);
+
 	return 0;
 }
 
@@ -640,6 +638,31 @@ static int rt5640_readable_register(
 	default:
 		return 0;
 	}
+}
+
+static void dc_calibrate(struct snd_soc_codec *codec)
+{
+	unsigned int sclk_src;
+
+	sclk_src = snd_soc_read(codec, RT5640_GLB_CLK) &
+		RT5640_SCLK_SRC_MASK;
+
+	snd_soc_update_bits(codec, RT5640_PWR_ANLG2,
+		RT5640_PWR_MB1, RT5640_PWR_MB1);
+	snd_soc_update_bits(codec, RT5640_DEPOP_M2,
+		RT5640_DEPOP_MASK, RT5640_DEPOP_MAN);
+	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+		RT5640_HP_CP_MASK | RT5640_HP_SG_MASK | RT5640_HP_CB_MASK,
+		RT5640_HP_CP_PU | RT5640_HP_SG_DIS | RT5640_HP_CB_PU);
+
+	snd_soc_update_bits(codec, RT5640_GLB_CLK,
+		RT5640_SCLK_SRC_MASK, 0x2 << RT5640_SCLK_SRC_SFT);
+
+	rt5640_index_write(codec, RT5640_HP_DCC_INT1, 0x9f00);
+	snd_soc_update_bits(codec, RT5640_PWR_ANLG2,
+		RT5640_PWR_MB1, 0);
+	snd_soc_update_bits(codec, RT5640_GLB_CLK,
+		RT5640_SCLK_SRC_MASK, sclk_src);
 }
 
 /**
@@ -1451,7 +1474,7 @@ static int rt5640_adc_event(struct snd_soc_dapm_widget *w,
 	struct snd_soc_codec *codec = w->codec;
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		msleep(1);
+		usleep_range(1000, 1500);
 		rt5640_index_update_bits(codec,
 			RT5640_CHOP_DAC_ADC, 0x1000, 0x1000);
 		break;
@@ -1478,7 +1501,7 @@ static int rt5640_spk_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		msleep(DEPOP_DELAY);
+		usleep_range(1000, 1500); /* depop delay */
 		snd_soc_update_bits(codec, RT5640_PWR_DIG1,
 			RT5640_PWR_CLS_D, RT5640_PWR_CLS_D);
 		rt5640_index_update_bits(codec,
@@ -1530,57 +1553,66 @@ static int rt5640_spk_event(struct snd_soc_dapm_widget *w,
 
 static void rt5640_pmu_depop(struct snd_soc_codec *codec)
 {
-	/* depop parameters */
-	snd_soc_update_bits(codec, RT5640_DEPOP_M2,
-		RT5640_DEPOP_MASK, RT5640_DEPOP_MAN);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_HP_CP_MASK | RT5640_HP_SG_MASK | RT5640_HP_CB_MASK,
-		RT5640_HP_CP_PU | RT5640_HP_SG_DIS | RT5640_HP_CB_PU);
-	rt5640_index_write(codec, RT5640_HP_DCC_INT1, 0x9f00);
-	/* headphone amp power on */
-	snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
-		RT5640_PWR_FV1 | RT5640_PWR_FV2, 0);
-	snd_soc_update_bits(codec, RT5640_PWR_VOL,
-		RT5640_PWR_HV_L | RT5640_PWR_HV_R,
-		RT5640_PWR_HV_L | RT5640_PWR_HV_R);
-	snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
-		RT5640_PWR_HP_L | RT5640_PWR_HP_R | RT5640_PWR_HA,
-		RT5640_PWR_HP_L | RT5640_PWR_HP_R | RT5640_PWR_HA);
-	msleep(50);
-	snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
-		RT5640_PWR_FV1 | RT5640_PWR_FV2 | RT5640_PWR_HP_L |
-		RT5640_PWR_HP_R | RT5640_PWR_HA,
-		RT5640_PWR_FV1 | RT5640_PWR_FV2 | RT5640_PWR_HP_L |
-		RT5640_PWR_HP_R | RT5640_PWR_HA);
-	rt5640_index_write(codec, RT5640_CHOP_DAC_ADC, 0x2600);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_HP_CO_MASK | RT5640_HP_SG_MASK,
-		RT5640_HP_CO_EN | RT5640_HP_SG_EN);
-	/* headphone unmute sequence */
-	snd_soc_update_bits(codec, RT5640_DEPOP_M3,
-		RT5640_CP_FQ1_MASK | RT5640_CP_FQ2_MASK | RT5640_CP_FQ3_MASK,
-		(RT5640_CP_FQ_192_KHZ << RT5640_CP_FQ1_SFT) |
-		(RT5640_CP_FQ_12_KHZ << RT5640_CP_FQ2_SFT) |
-		(RT5640_CP_FQ_192_KHZ << RT5640_CP_FQ3_SFT));
-	rt5640_index_write(codec, RT5640_MAMP_INT_REG2, 0xfc00);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_SMT_TRIG_MASK, RT5640_SMT_TRIG_EN);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_RSTN_MASK, RT5640_RSTN_EN);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_RSTN_MASK | RT5640_HP_L_SMT_MASK | RT5640_HP_R_SMT_MASK,
-		RT5640_RSTN_DIS | RT5640_HP_L_SMT_EN | RT5640_HP_R_SMT_EN);
-	snd_soc_update_bits(codec, RT5640_HP_VOL,
-		RT5640_L_MUTE | RT5640_R_MUTE, 0);
-	msleep(100);
-	snd_soc_update_bits(codec, RT5640_DEPOP_M1,
-		RT5640_HP_SG_MASK | RT5640_HP_L_SMT_MASK |
-		RT5640_HP_R_SMT_MASK, RT5640_HP_SG_DIS |
-		RT5640_HP_L_SMT_DIS | RT5640_HP_R_SMT_DIS);
+	if (hp_amp_count == 0) {
+		/* depop parameters */
+		snd_soc_update_bits(codec, RT5640_DEPOP_M2,
+			RT5640_DEPOP_MASK, RT5640_DEPOP_MAN);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_HP_CP_MASK | RT5640_HP_SG_MASK |
+					RT5640_HP_CB_MASK,
+			RT5640_HP_CP_PU | RT5640_HP_SG_DIS | RT5640_HP_CB_PU);
+		/* headphone amp power on */
+		snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
+			RT5640_PWR_FV1 | RT5640_PWR_FV2, 0);
+		snd_soc_update_bits(codec, RT5640_PWR_VOL,
+			RT5640_PWR_HV_L | RT5640_PWR_HV_R,
+			RT5640_PWR_HV_L | RT5640_PWR_HV_R);
+		snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
+			RT5640_PWR_HP_L | RT5640_PWR_HP_R | RT5640_PWR_HA,
+			RT5640_PWR_HP_L | RT5640_PWR_HP_R | RT5640_PWR_HA);
+		/* wait for power to be stable to depop */
+		usleep_range(5000, 6000);
+		snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
+			RT5640_PWR_FV1 | RT5640_PWR_FV2,
+			RT5640_PWR_FV1 | RT5640_PWR_FV2);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_HP_CO_MASK | RT5640_HP_SG_MASK,
+			RT5640_HP_CO_EN | RT5640_HP_SG_EN);
+		/* headphone unmute sequence */
+		snd_soc_update_bits(codec, RT5640_DEPOP_M3,
+			RT5640_CP_FQ1_MASK | RT5640_CP_FQ2_MASK |
+					RT5640_CP_FQ3_MASK,
+			(RT5640_CP_FQ_192_KHZ << RT5640_CP_FQ1_SFT) |
+			(RT5640_CP_FQ_12_KHZ << RT5640_CP_FQ2_SFT) |
+			(RT5640_CP_FQ_192_KHZ << RT5640_CP_FQ3_SFT));
+		rt5640_index_write(codec, RT5640_MAMP_INT_REG2, 0xfc00);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_SMT_TRIG_MASK, RT5640_SMT_TRIG_EN);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_RSTN_MASK, RT5640_RSTN_EN);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_RSTN_MASK | RT5640_HP_L_SMT_MASK |
+					RT5640_HP_R_SMT_MASK,
+			RT5640_RSTN_DIS | RT5640_HP_L_SMT_EN |
+					RT5640_HP_R_SMT_EN);
+		snd_soc_update_bits(codec, RT5640_HP_VOL,
+			RT5640_L_MUTE | RT5640_R_MUTE, 0);
+		usleep_range(40000, 41000);
+		snd_soc_update_bits(codec, RT5640_DEPOP_M1,
+			RT5640_HP_SG_MASK | RT5640_HP_L_SMT_MASK |
+			RT5640_HP_R_SMT_MASK, RT5640_HP_SG_DIS |
+			RT5640_HP_L_SMT_DIS | RT5640_HP_R_SMT_DIS);
+	}
+	hp_amp_count++;
 }
 
 static void rt5640_pmd_depop(struct snd_soc_codec *codec)
 {
+
+	if (--hp_amp_count) {
+		hp_amp_count = 0;
+		return;
+	}
 	/* headphone mute sequence */
 	snd_soc_update_bits(codec, RT5640_DEPOP_M3,
 		RT5640_CP_FQ1_MASK | RT5640_CP_FQ2_MASK | RT5640_CP_FQ3_MASK,
@@ -1620,10 +1652,15 @@ static int rt5640_hp_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_codec *codec = w->codec;
+	unsigned int val;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
+		val = snd_soc_read(codec,0xb1);
+		snd_soc_update_bits(codec,0xb1,0x007f,0x0000);
 		rt5640_pmu_depop(codec);
+		snd_soc_write(codec,0xb1,val);
+		snd_soc_write(codec,0xb0,0x6000);
 		break;
 
 	case SND_SOC_DAPM_PRE_PMD:
@@ -1666,6 +1703,16 @@ static int rt5640_lout_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
+		/* set DAC Digital Volume = -0.375dB */
+		snd_soc_update_bits(codec, RT5640_DAC1_DIG_VOL,
+			0xFFFF, 0xAEAE);
+		/* set Output mixer Volume = -1.5dB */
+		snd_soc_update_bits(codec, RT5640_OUTPUT,
+			0x3F3F, 0x0909);
+		rt5640_pmu_depop(codec);
+		/* unmute Output Volume Channel */
+		snd_soc_update_bits(codec, RT5640_OUTPUT,
+			0x4040, 0);
 		snd_soc_update_bits(codec, RT5640_OUTPUT,
 			RT5640_L_MUTE | RT5640_R_MUTE, 0);
 		break;
@@ -1674,6 +1721,16 @@ static int rt5640_lout_event(struct snd_soc_dapm_widget *w,
 		snd_soc_update_bits(codec, RT5640_OUTPUT,
 			RT5640_L_MUTE | RT5640_R_MUTE,
 			RT5640_L_MUTE | RT5640_R_MUTE);
+		/* mute Output Volume Channel */
+		snd_soc_update_bits(codec, RT5640_OUTPUT,
+			0x4040, 0x4040);
+		/* set Output mixer Volume = 0dB */
+		snd_soc_update_bits(codec, RT5640_OUTPUT,
+			0x3F3F, 0x0808);
+		/* set DAC Digital Volume = 0dB */
+		snd_soc_update_bits(codec, RT5640_DAC1_DIG_VOL,
+			0xFFFF, 0xAFAF);
+		rt5640_pmd_depop(codec);
 		break;
 
 	default:
@@ -1906,17 +1963,17 @@ static const struct snd_soc_dapm_widget rt5640_dapm_widgets[] = {
 	SND_SOC_DAPM_MIXER("Mono MIX", RT5640_PWR_ANLG1, RT5640_PWR_MM_BIT, 0,
 		rt5640_mono_mix, ARRAY_SIZE(rt5640_mono_mix)),
 
-	SND_SOC_DAPM_PGA_E("HP amp", SND_SOC_NOPM, 0, 0, NULL, 0,
+	SND_SOC_DAPM_PGA_S("HP amp", 1, SND_SOC_NOPM, 0, 0,
 		rt5640_hp_event, SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
 
-	SND_SOC_DAPM_PGA_E("SPK amp", SND_SOC_NOPM, 0, 0, NULL, 0,
+	SND_SOC_DAPM_PGA_S("SPK amp", 1, SND_SOC_NOPM, 0, 0,
 		rt5640_spk_event, SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
 
-	SND_SOC_DAPM_PGA_E("LOUT amp", SND_SOC_NOPM, 0, 0, NULL, 0,
+	SND_SOC_DAPM_PGA_S("LOUT amp", 1, SND_SOC_NOPM, 0, 0,
 		rt5640_lout_event, SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
 
-	SND_SOC_DAPM_PGA_E("Mono amp", RT5640_PWR_ANLG1,
-		RT5640_PWR_MA_BIT, 0, NULL, 0, rt5640_mono_event,
+	SND_SOC_DAPM_PGA_S("Mono amp", 1, RT5640_PWR_ANLG1,
+		RT5640_PWR_MA_BIT, 0, rt5640_mono_event,
 		SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
 
 	/* Output Lines */
@@ -2702,7 +2759,11 @@ static int rt5640_set_bias_level(struct snd_soc_codec *codec,
 				RT5640_PWR_BG | RT5640_PWR_VREF2,
 				RT5640_PWR_VREF1 | RT5640_PWR_MB |
 				RT5640_PWR_BG | RT5640_PWR_VREF2);
-			msleep(100);
+			/*
+			 * wait 10ms to
+			 * make 1st and 2nd reference voltages stable
+			 */
+			usleep_range(10000, 15000);
 			snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
 				RT5640_PWR_FV1 | RT5640_PWR_FV2,
 				RT5640_PWR_FV1 | RT5640_PWR_FV2);
@@ -2713,6 +2774,8 @@ static int rt5640_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_OFF:
+		snd_soc_write(codec, RT5640_DEPOP_M1, 0x0004);
+		snd_soc_write(codec, RT5640_DEPOP_M2, 0x1100);
 		snd_soc_write(codec, RT5640_PWR_DIG1, 0x0000);
 		snd_soc_write(codec, RT5640_PWR_DIG2, 0x0000);
 		snd_soc_write(codec, RT5640_PWR_VOL, 0x0000);
@@ -3276,7 +3339,8 @@ static int rt5640_probe(struct snd_soc_codec *codec)
 		RT5640_PWR_BG | RT5640_PWR_VREF2,
 		RT5640_PWR_VREF1 | RT5640_PWR_MB |
 		RT5640_PWR_BG | RT5640_PWR_VREF2);
-	msleep(100);
+	/* need wait 10ms to make 1st and 2nd reference voltage stable */
+	usleep_range(10000, 15000);
 	snd_soc_update_bits(codec, RT5640_PWR_ANLG1,
 		RT5640_PWR_FV1 | RT5640_PWR_FV2,
 		RT5640_PWR_FV1 | RT5640_PWR_FV2);
@@ -3296,7 +3360,7 @@ static int rt5640_probe(struct snd_soc_codec *codec)
 	}
 
 	rt5640_reg_init(codec);
-
+	dc_calibrate(codec);
 	codec->dapm.bias_level = SND_SOC_BIAS_STANDBY;
 	rt5640->codec = codec;
 	rt5640_audio_codec = codec;
@@ -3335,39 +3399,11 @@ static int rt5640_remove(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int rt5640_suspend_i2c(struct i2c_client  *codec, pm_message_t state)
-{
-	int ret =0;
-	printk("rt5640_suspend_i2c+\n");
-	snd_soc_update_bits(rt5640_audio_codec, RT5640_SPK_VOL,
-			RT5640_L_MUTE | RT5640_R_MUTE,
-			RT5640_L_MUTE | RT5640_R_MUTE);
-	rt5640_index_update_bits(rt5640_audio_codec,
-			RT5640_CLSD_INT_REG1, 0xf000, 0x0000);
-	rt5640_pmd_depop(rt5640_audio_codec);
-	rt5640_set_bias_level(rt5640_audio_codec, SND_SOC_BIAS_OFF);
-	tegra_gpio_enable(TEGRA_GPIO_PW4);
-	ret = gpio_request(TEGRA_GPIO_PW4, "audio_mclk");
-	if (ret < 0)
-		pr_err("%s: gpio_request failed for gpio %s\n",__func__, "AUDIO_MCLK");
-	gpio_direction_output(TEGRA_GPIO_PW4, 0);
-	gpio_free(TEGRA_GPIO_PW4);
-	printk("rt5640_suspend_i2c-\n");
-	return 0;
-}
-
-static int rt5640_resume_i2c(struct i2c_client  *codec)
-{
-	printk("rt5640_resume_i2c+\n");
-	tegra_gpio_disable(TEGRA_GPIO_PW4);
-	rt5640_set_bias_level(rt5640_audio_codec, SND_SOC_BIAS_STANDBY);
-	printk("rt5640_resume_i2c-\n");
-	return 0;
-}
-
 #ifdef CONFIG_PM
 static int rt5640_suspend(struct snd_soc_codec *codec, pm_message_t state)
 {
+	int ret =0;
+	printk("rt5640_suspend+\n");
 #if defined(CONFIG_SND_SOC_RT5642_MODULE) || defined(CONFIG_SND_SOC_RT5642)
 	/* After opening LDO of DSP, then close LDO of codec.
 	 * (1) DSP LDO power on
@@ -3377,17 +3413,34 @@ static int rt5640_suspend(struct snd_soc_codec *codec, pm_message_t state)
 	 */
 	rt5640_dsp_suspend(codec, state);
 #endif
+
+	snd_soc_update_bits(codec, RT5640_SPK_VOL,
+			RT5640_L_MUTE | RT5640_R_MUTE,
+			RT5640_L_MUTE | RT5640_R_MUTE);
+	rt5640_index_update_bits(codec,
+			RT5640_CLSD_INT_REG1, 0xf000, 0x0000);
+	rt5640_pmd_depop(codec);
 	rt5640_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	tegra_gpio_enable(TEGRA_GPIO_PW4);
+	ret = gpio_request(TEGRA_GPIO_PW4, "audio_mclk");
+	if (ret < 0)
+		pr_err("%s: gpio_request failed for gpio %s\n",__func__, "AUDIO_MCLK");
+	gpio_direction_output(TEGRA_GPIO_PW4, 0);
+	gpio_free(TEGRA_GPIO_PW4);
+	printk("rt5640_suspend-\n");
 	return 0;
 }
 
 static int rt5640_resume(struct snd_soc_codec *codec)
 {
+	printk("rt5640_resume+\n");
+	tegra_gpio_disable(TEGRA_GPIO_PW4);
 	rt5640_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 #if defined(CONFIG_SND_SOC_RT5642_MODULE) || defined(CONFIG_SND_SOC_RT5642)
 	/* After opening LDO of codec, then close LDO of DSP. */
 	rt5640_dsp_resume(codec);
 #endif
+	printk("rt5640_resume-\n");
 	return 0;
 }
 #else
@@ -3542,8 +3595,6 @@ struct i2c_driver rt5640_i2c_driver = {
 		.name = "rt5640",
 		.owner = THIS_MODULE,
 	},
-	.suspend = rt5640_suspend_i2c,
-	.resume	= rt5640_resume_i2c,
 	.probe = rt5640_i2c_probe,
 	.remove   = __devexit_p(rt5640_i2c_remove),
 	.shutdown = rt5640_i2c_shutdown,

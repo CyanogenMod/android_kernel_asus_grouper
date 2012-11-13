@@ -35,13 +35,13 @@
 #include "devices.h"
 #include "gpio-names.h"
 #include "baseband-xmm-power.h"
-
+#include "pm-irq.h"
 MODULE_LICENSE("GPL");
 
 unsigned long modem_ver = XMM_MODEM_VER_1130;
 EXPORT_SYMBOL(modem_ver);
 
-unsigned long modem_flash;
+unsigned long modem_flash = 1;
 EXPORT_SYMBOL(modem_flash);
 
 unsigned long modem_pm = 1;
@@ -74,8 +74,11 @@ static struct gpio tegra_baseband_gpios[] = {
 	{ -1, GPIOF_OUT_INIT_LOW,  "BB_ON"   },
 	{ -1, GPIOF_OUT_INIT_LOW,  "IPC_BB_WAKE" },
 	{ -1, GPIOF_IN,            "IPC_AP_WAKE" },
-	{ -1, GPIOF_OUT_INIT_HIGH, "IPC_HSIC_ACTIVE" },
+	{ -1, GPIOF_OUT_INIT_LOW,  "IPC_HSIC_ACTIVE" },
 	{ -1, GPIOF_IN,            "IPC_HSIC_SUS_REQ" },
+	{ -1, GPIOF_OUT_INIT_LOW,  "BB_VBAT" },
+	{ -1, GPIOF_IN,            "IPC_BB_RST_IND" },
+	{ -1, GPIOF_OUT_INIT_LOW,  "IPC_BB_FORCE_CRASH" },
 };
 
 static enum {
@@ -93,8 +96,11 @@ static struct work_struct init1_work;
 static struct work_struct init2_work;
 static struct work_struct L2_resume_work;
 static struct baseband_power_platform_data *baseband_power_driver_data;
+static struct regulator *reg_grouper_hsic = NULL;    /* LDO7 */
+static int waiting_falling_flag = 0;
 static bool register_hsic_device;
 static struct wake_lock wakelock;
+static struct wake_lock modem_recovery_wakelock;
 static struct usb_device *usbdev;
 static bool CP_initiated_L2toL0;
 static bool modem_power_on;
@@ -105,10 +111,35 @@ static bool wakeup_pending;
 static bool modem_sleep_flag;
 static spinlock_t xmm_lock;
 static DEFINE_MUTEX(xmm_onoff_mutex);
+static int modem_reset_flag = 0;
 
+static void baseband_xmm_power_reset_on(void);
 static void baseband_xmm_power_L2_resume(void);
 static int baseband_xmm_power_driver_handle_resume(
 			struct baseband_power_platform_data *data);
+extern void tegra_usb_suspend_hsic(void);
+extern void tegra_usb_resume_hsic(void);
+
+int baseband_xmm_enable_hsic_power(int enable)
+{
+	int ret = 0;
+
+	if(!reg_grouper_hsic) {
+		pr_err("%s reg_grouper_hsic is NULL!\n", __func__);
+		ret = -1;
+		goto exit;
+	}
+
+	pr_info("enable: %d\n", enable);
+	if (enable > 0) {
+		ret = regulator_enable(reg_grouper_hsic);
+	} else {
+		ret = regulator_disable(reg_grouper_hsic);
+	}
+
+exit:
+	return ret;
+}
 
 static int baseband_modem_power_on(struct baseband_power_platform_data *data)
 {
@@ -156,7 +187,7 @@ static int baseband_xmm_power_on(struct platform_device *device)
 	else
 		ipc_ap_wake_state = IPC_AP_WAKE_INIT2;
 
-	pr_debug("%s wake_st(%d) modem version %d\n", __func__,
+	pr_debug("%s wake_st(%d) modem version %ld\n", __func__,
 					ipc_ap_wake_state, modem_ver);
 
 	/* register usb host controller */
@@ -183,6 +214,18 @@ static int baseband_xmm_power_on(struct platform_device *device)
 			pr_debug("%s call baseband_modem_power_on\n", __func__);
 			baseband_modem_power_on(data);
 		}
+	}else {
+		/* reset flashed modem then it will respond with
+		 * ap-wake rising followed by falling gpio
+		 */
+
+		pr_debug("%s: reset flash modem\n", __func__);
+		modem_power_on = false;
+		ipc_ap_wake_state = IPC_AP_WAKE_INIT1;
+		gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
+		waiting_falling_flag = 0;
+
+		baseband_xmm_power_reset_on();
 	}
 	ret = enable_irq_wake(gpio_to_irq(data->modem.xmm.ipc_ap_wake));
 	if (ret < 0)
@@ -221,9 +264,13 @@ static int baseband_xmm_power_off(struct platform_device *device)
 		pr_err("%s: disable_irq_wake error\n", __func__);
 
 	/* unregister usb host controller */
-	if (data->hsic_unregister)
-		data->hsic_unregister(data->modem.xmm.hsic_device);
-	else
+	if (data->hsic_unregister) {
+		if (!register_hsic_device) {
+			register_hsic_device = true;
+			data->hsic_unregister(data->modem.xmm.hsic_device);
+		} else
+			pr_err("%s: hsic contorller was not registered\n", __func__);
+	} else
 		pr_err("%s: hsic_unregister is missing\n", __func__);
 
 
@@ -236,6 +283,8 @@ static int baseband_xmm_power_off(struct platform_device *device)
 
 	/* drive bb_rst low */
 	gpio_set_value(data->modem.xmm.bb_rst, 0);
+	mdelay(1);
+	gpio_set_value(data->modem.xmm.bb_vbat, 0);
 	mdelay(1);
 
 	spin_lock_irqsave(&xmm_lock, flags);
@@ -297,9 +346,183 @@ static ssize_t baseband_xmm_onoff(struct device *dev,
 	return count;
 }
 
+static ssize_t store_dwd_reset_modem(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	int state;
+	struct platform_device *device = to_platform_device(dev);
+	struct baseband_power_platform_data *data;
+
+	sscanf(buf, "%d", &state);
+
+	if (state > 0) {
+		pr_info("++ dwd_reset_modem ++\n");
+		/* check for device / platform data */
+		if (!device) {
+			pr_err("%s: !device\n", __func__);
+			return -EINVAL;
+		}
+		data = (struct baseband_power_platform_data *)
+				device->dev.platform_data;
+		if (!data) {
+			pr_err("%s: !data\n", __func__);
+			return -EINVAL;
+		}
+
+		if (!(data->hsic_unregister && data->hsic_register)) {
+			pr_err("%s: hsic_unregister or hsic_register missing\n", __func__);
+			return -EINVAL;
+		}
+		if (!register_hsic_device) {
+			register_hsic_device = true;
+			data->hsic_unregister(data->modem.xmm.hsic_device);
+			mdelay(20);
+		}
+		gpio_set_value(baseband_power_driver_data->modem.xmm.bb_rst, 0);
+		ipc_ap_wake_state = IPC_AP_WAKE_UNINIT;
+		mdelay(1);
+		data->modem.xmm.hsic_device = data->hsic_register();
+		register_hsic_device = false;
+		baseband_xmm_power_reset_on();
+		pr_info("-- dwd_reset_modem --\n");
+	}
+	return count;
+}
+
+static ssize_t store_nml_reset_modem(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+       int state;
+	struct platform_device *device = to_platform_device(dev);
+
+       sscanf(buf, "%d", &state);
+
+       pr_info("++ nml_reset_modem ++\n");
+       if (state > 0) {
+		baseband_xmm_power_off(device);
+		msleep(50);
+		baseband_xmm_power_on(device);
+		modem_reset_flag = 1;
+       }
+       pr_info("-- nml_reset_modem --\n");
+       return count;
+}
+
+static ssize_t store_force_crash_modem(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	int state;
+	struct platform_device *device = to_platform_device(dev);
+	struct baseband_power_platform_data *data;
+
+	sscanf(buf, "%d", &state);
+
+	pr_info("++ force_crash_modem ++\n");
+	/* check for device / platform data */
+	if (!device) {
+		pr_err("%s: !device\n", __func__);
+		return -EINVAL;
+	}
+	data = (struct baseband_power_platform_data *)
+		device->dev.platform_data;
+	if (!data) {
+		pr_err("%s: !data\n", __func__);
+		return -EINVAL;
+	}
+
+	if (state > 0) {
+		gpio_set_value(data->modem.xmm.ipc_bb_force_crash, 1);
+		msleep(50);
+		gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
+	}
+	pr_info("-- force_crash_modem --\n");
+
+	return count;
+}
+
+/*
 static DEVICE_ATTR(xmm_onoff, S_IRUSR | S_IWUSR | S_IRGRP,
 		NULL, baseband_xmm_onoff);
+*/
+static struct device_attribute xmm_device_attr[] = {
+       __ATTR(xmm_onoff, S_IRUSR | S_IWUSR | S_IRGRP, NULL, baseband_xmm_onoff),
+       __ATTR(xmm_dwd_reset, S_IRUSR | S_IWUSR | S_IRGRP, NULL, store_dwd_reset_modem),
+       __ATTR(xmm_nml_reset, S_IRUSR | S_IWUSR | S_IRGRP, NULL, store_nml_reset_modem),
+       __ATTR(xmm_force_crash, S_IRUSR | S_IWUSR | S_IRGRP, NULL, store_force_crash_modem),
+       __ATTR_NULL,
+};
 
+/* baseband_usb_utmip_host_register functions
+	1 -> register utmip host controller
+	0 -> unregister utmip host controller
+*/
+int baseband_usb_utmip_host_register(int enable)
+{
+	struct baseband_power_platform_data *data = baseband_power_driver_data;
+
+	if (!data) {
+		pr_err("%s: !data\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!(data->hsic_unregister && data->hsic_register && data->utmip_unregister && data->utmip_register)) {
+		pr_err("%s: utmip_unregister or utmip_register missing\n", __func__);
+		return -EINVAL;
+	}
+
+	if(!enable) {
+		if (!register_hsic_device) {
+			register_hsic_device = true;
+			data->utmip_unregister(data->modem.xmm.hsic_device);
+		}
+	} else if (enable)
+		data->modem.xmm.hsic_device = data->utmip_register();
+
+	return 0;
+ }
+
+/* baseband_usb_hsic_host_register functions
+	1 -> register hsic host controller
+	0 -> unregister hsic host controller
+*/
+int baseband_usb_hsic_host_register(int enable)
+{
+	struct baseband_power_platform_data *data = baseband_power_driver_data;
+
+	if (!data) {
+		pr_err("%s: !data\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!(data->hsic_unregister && data->hsic_register && data->utmip_unregister && data->utmip_register)) {
+		pr_err("%s: hsic_unregister or hsic_register missing\n", __func__);
+		return -EINVAL;
+	}
+
+	if(!enable) {
+		if (!register_hsic_device) {
+			register_hsic_device = true;
+			data->hsic_unregister(data->modem.xmm.hsic_device);
+		}
+	} else if (enable)
+		data->modem.xmm.hsic_device = data->hsic_register();
+
+	return 0;
+}
+
+void baseband_xmm_L3_resume_check(void)
+{
+       struct baseband_power_platform_data *data = baseband_power_driver_data;
+       if (modem_sleep_flag) {
+               pr_info("%s Resume from L3 without calling resume"
+                      "function\n",  __func__);
+               baseband_xmm_power_driver_handle_resume(data);
+       }
+}
+EXPORT_SYMBOL_GPL(baseband_xmm_L3_resume_check);
 
 void baseband_xmm_set_power_status(unsigned int status)
 {
@@ -314,11 +537,11 @@ void baseband_xmm_set_power_status(unsigned int status)
 
 	switch (status) {
 	case BBXMM_PS_L0:
-		if (modem_sleep_flag) {
+		/*if (modem_sleep_flag) {
 			pr_info("%s Resume from L3 without calling resume"
 						"function\n",  __func__);
 			baseband_xmm_power_driver_handle_resume(data);
-		}
+		}*/
 		pr_info("L0\n");
 		value = gpio_get_value(data->modem.xmm.ipc_hsic_active);
 		pr_debug("before L0 ipc_hsic_active=%d\n", value);
@@ -343,7 +566,7 @@ void baseband_xmm_set_power_status(unsigned int status)
 		break;
 	case BBXMM_PS_L3:
 		if (baseband_xmm_powerstate == BBXMM_PS_L2TOL0) {
-			if (!data->modem.xmm.ipc_ap_wake) {
+			if (!gpio_get_value(data->modem.xmm.ipc_ap_wake)) {
 				spin_lock_irqsave(&xmm_lock, flags);
 				wakeup_pending = true;
 				spin_unlock_irqrestore(&xmm_lock, flags);
@@ -357,8 +580,10 @@ void baseband_xmm_set_power_status(unsigned int status)
 				__func__);
 			wake_unlock(&wakelock);
 		}
-		gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
-		pr_debug("gpio host active low->\n");
+		if (register_hsic_device != true && wakeup_pending == false) {
+			gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
+			pr_debug("gpio host active low->\n");
+		}
 		break;
 	case BBXMM_PS_L2TOL0:
 		/* do this only from L2 state */
@@ -366,14 +591,28 @@ void baseband_xmm_set_power_status(unsigned int status)
 			baseband_xmm_powerstate = status;
 			pr_debug("BB XMM POWER STATE = %d\n", status);
 			baseband_xmm_power_L2_resume();
-		}
+		} else
+			goto exit_without_state_change;
 	default:
 		break;
 	}
 	baseband_xmm_powerstate = status;
 	pr_debug("BB XMM POWER STATE = %d\n", status);
+	return;
+
+exit_without_state_change:
+	pr_info("BB XMM POWER STATE = %d (not change to %d)\n",
+			baseband_xmm_powerstate, status);
+	return;
 }
 EXPORT_SYMBOL_GPL(baseband_xmm_set_power_status);
+
+void baseband_xmm_ap_resume_work(void)
+{
+	pr_debug("%s: AP resume\n",__func__);
+	queue_work(workqueue, &L2_resume_work);
+}
+EXPORT_SYMBOL( baseband_xmm_ap_resume_work);
 
 irqreturn_t baseband_xmm_power_ipc_ap_wake_irq(int irq, void *dev_id)
 {
@@ -401,14 +640,19 @@ irqreturn_t baseband_xmm_power_ipc_ap_wake_irq(int irq, void *dev_id)
 				__func__);
 		}
 	} else if (ipc_ap_wake_state == IPC_AP_WAKE_INIT1) {
-		if (!value) {
+		if (value) {
 			pr_debug("%s - IPC_AP_WAKE_INIT2"
-				" - wait for rising edge\n",
+				" - wait for falling edge\n",
 				__func__);
+			waiting_falling_flag = 1;
 		} else {
 			pr_debug("%s - IPC_AP_WAKE_INIT2"
-				" - got rising edge\n",
+				" - got falling edge\n",
 				__func__);
+			if (waiting_falling_flag == 0) {
+				pr_debug("%s return because irq must get the rising event at first\n", __func__);
+				return IRQ_HANDLED;
+			}
 			/* go to IPC_AP_WAKE_INIT2 state */
 			ipc_ap_wake_state = IPC_AP_WAKE_INIT2;
 			/* queue work */
@@ -532,11 +776,17 @@ static void baseband_xmm_power_init2_work(struct work_struct *work)
 
 	/* register usb host controller only once */
 	if (register_hsic_device) {
-		if (data->hsic_register)
+		if (data->hsic_register) {
 			data->modem.xmm.hsic_device = data->hsic_register();
-		else
+			if(modem_reset_flag == 1) {
+				tegra_usb_suspend_hsic();
+				mdelay(1000);
+				tegra_usb_resume_hsic();
+			}
+		} else
 			pr_err("%s: hsic_register is missing\n", __func__);
 		register_hsic_device = false;
+		modem_reset_flag == 0;
 	}
 
 }
@@ -602,6 +852,13 @@ static void baseband_xmm_power_L2_resume_work(struct work_struct *work)
 		return;
 	usb_lock_device(usbdev);
 	intf = usb_ifnum_to_if(usbdev, 0);
+
+	if (!intf) {
+		pr_err("%s: the interface is NULL\n", __func__);
+		usb_unlock_device(usbdev);
+		return;
+	}
+
 	if (usb_autopm_get_interface(intf) == 0)
 		usb_autopm_put_interface(intf);
 	usb_unlock_device(usbdev);
@@ -611,6 +868,11 @@ static void baseband_xmm_power_L2_resume_work(struct work_struct *work)
 
 static void baseband_xmm_power_reset_on(void)
 {
+	pr_info("baseband_xmm_power_reset_on\n");
+
+	/* Enable VBAT */
+	gpio_set_value(baseband_power_driver_data->modem.xmm.bb_vbat, 1);
+
 	/* reset / power on sequence */
 	mdelay(40);
 	gpio_set_value(baseband_power_driver_data->modem.xmm.bb_rst, 1);
@@ -682,12 +944,15 @@ static void baseband_xmm_power_work_func(struct work_struct *work)
 		if (enum_delay_ms)
 			mdelay(enum_delay_ms);
 		/* register usb host controller */
+		/* This is done on ap_wake falling edge
 		pr_debug("%s: register usb host controller\n", __func__);
 		if (baseband_power_driver_data->hsic_register)
 			baseband_power_driver_data->modem.xmm.hsic_device =
 				baseband_power_driver_data->hsic_register();
 		else
 			pr_err("%s: hsic_register is missing\n", __func__);
+		*/
+
 		/* go to next state */
 		bbxmm_work->state = (modem_ver < XMM_MODEM_VER_1130)
 			? BBXMM_WORK_INIT_FLASH_PM_VER_LT_1130_STEP1
@@ -738,12 +1003,14 @@ static void baseband_xmm_device_add_handler(struct usb_device *udev)
 		usbdev = udev;
 		usb_enable_autosuspend(udev);
 		pr_info("enable autosuspend\n");
+		wake_unlock(&modem_recovery_wakelock);
 	}
 }
 
 static void baseband_xmm_device_remove_handler(struct usb_device *udev)
 {
 	if (usbdev == udev) {
+		wake_lock_timeout(&modem_recovery_wakelock, HZ * 60);
 		pr_info("Remove device %d <%s %s>\n", udev->devnum,
 			udev->manufacturer, udev->product);
 		usbdev = 0;
@@ -778,10 +1045,11 @@ static int baseband_xmm_power_driver_probe(struct platform_device *device)
 			device->dev.platform_data;
 	struct device *dev = &device->dev;
 	unsigned long flags;
-	int err;
+	int err, i;
+	int ap_wake_irq;
 
-	pr_debug("%s\n", __func__);
-	pr_debug("[XMM] enum_delay_ms=%ld\n", enum_delay_ms);
+	pr_info("%s\n", __func__);
+	pr_info("[XMM] enum_delay_ms=%ld\n", enum_delay_ms);
 
 	/* check for platform data */
 	if (!data)
@@ -797,14 +1065,15 @@ static int baseband_xmm_power_driver_probe(struct platform_device *device)
 	baseband_power_driver_data = data;
 
 	/* create device file */
-	err = device_create_file(dev, &dev_attr_xmm_onoff);
+	/*err = device_create_file(dev, &dev_attr_xmm_onoff);
 	if (err < 0) {
 		pr_err("%s - device_create_file failed\n", __func__);
 		return -ENODEV;
-	}
+	}*/
 
 	/* init wake lock */
 	wake_lock_init(&wakelock, WAKE_LOCK_SUSPEND, "baseband_xmm_power");
+	wake_lock_init(&modem_recovery_wakelock, WAKE_LOCK_SUSPEND, "modem_recovery");
 
 	/* init spin lock */
 	spin_lock_init(&xmm_lock);
@@ -821,11 +1090,37 @@ static int baseband_xmm_power_driver_probe(struct platform_device *device)
 		->modem.xmm.ipc_hsic_active;
 	tegra_baseband_gpios[5].gpio = baseband_power_driver_data
 		->modem.xmm.ipc_hsic_sus_req;
+	tegra_baseband_gpios[6].gpio = baseband_power_driver_data
+		->modem.xmm.bb_vbat;
+	tegra_baseband_gpios[7].gpio = baseband_power_driver_data
+		->modem.xmm.ipc_bb_rst_ind;
+	tegra_baseband_gpios[8].gpio = baseband_power_driver_data
+		->modem.xmm.ipc_bb_force_crash;
 	err = gpio_request_array(tegra_baseband_gpios,
 		ARRAY_SIZE(tegra_baseband_gpios));
 	if (err < 0) {
 		pr_err("%s - request gpio(s) failed\n", __func__);
 		return -ENODEV;
+	}
+
+	/* location is at /sys/devices/platform/baseband_xmm_power */
+	for (i = 0; i < (ARRAY_SIZE(xmm_device_attr) - 1); i++) {
+		err = device_create_file(dev, &xmm_device_attr[i]);
+		if (err) {
+			pr_err("create file %d failed, err = %d\n", i, err);
+			goto failed_create_file;
+		}
+	}
+
+	/* get regulator LDO7 for hsic power */
+	if (!reg_grouper_hsic) {
+		reg_grouper_hsic = regulator_get(NULL, "vddio_hsic");
+		if (IS_ERR_OR_NULL(reg_grouper_hsic)) {
+			pr_err("grouper 3G HSIC power on LDO7 failed\n");
+			reg_grouper_hsic = NULL;
+			return PTR_ERR(reg_grouper_hsic);
+		}
+		regulator_set_voltage(reg_grouper_hsic, 1200000, 1200000);
 	}
 
 	/* request baseband irq(s) */
@@ -844,7 +1139,9 @@ static int baseband_xmm_power_driver_probe(struct platform_device *device)
 				__func__);
 			return err;
 		}
-		err = enable_irq_wake(gpio_to_irq(data->modem.xmm.ipc_ap_wake));
+		ap_wake_irq = enable_irq_wake(gpio_to_irq(data->modem.xmm.ipc_ap_wake));
+                tegra_pm_irq_set_wake_type(ap_wake_irq, IRQF_TRIGGER_FALLING);
+                enable_irq_wake(ap_wake_irq);
 		if (err < 0)
 			 pr_err("%s: enable_irq_wake error\n", __func__);
 		ipc_ap_wake_state = IPC_AP_WAKE_IRQ_READY;
@@ -892,10 +1189,16 @@ static int baseband_xmm_power_driver_probe(struct platform_device *device)
 
 	pr_debug("%s }\n", __func__);
 	return 0;
+
+failed_create_file:
+	while (i--)
+		device_remove_file(dev, &xmm_device_attr[i]);
+	return err;
 }
 
 static int baseband_xmm_power_driver_remove(struct platform_device *device)
 {
+	int i;
 	struct baseband_power_platform_data *data
 		= (struct baseband_power_platform_data *)
 			device->dev.platform_data;
@@ -923,16 +1226,28 @@ static int baseband_xmm_power_driver_remove(struct platform_device *device)
 	gpio_free_array(tegra_baseband_gpios,
 		ARRAY_SIZE(tegra_baseband_gpios));
 
+	/* disable regulator LDO7 for hsic power*/
+	regulator_disable(reg_grouper_hsic);
+	regulator_put(reg_grouper_hsic);
+	reg_grouper_hsic = NULL;
+
 	/* destroy wake lock */
 	wake_lock_destroy(&wakelock);
+	wake_lock_destroy(&modem_recovery_wakelock);
 
 	/* delete device file */
+	/*
 	device_remove_file(dev, &dev_attr_xmm_onoff);
+	*/
+	for (i = 0; i < (ARRAY_SIZE(xmm_device_attr) - 1); i++) {
+		device_remove_file(dev, &xmm_device_attr[i]);
+	}
 
 	/* unregister usb host controller */
-	if (data->hsic_unregister)
+	if (data->hsic_unregister && (!register_hsic_device)) {
+		register_hsic_device = true;
 		data->hsic_unregister(data->modem.xmm.hsic_device);
-	else
+	}else
 		pr_err("%s: hsic_unregister is missing\n", __func__);
 
 	return 0;

@@ -37,7 +37,7 @@
 #include <mach/pinmux.h>
 #include "fuse.h"
 #include "board-grouper.h"
-
+#include "baseband-xmm-power.h"
 
 #define TPS6591X_GPIO_BASE	TEGRA_NR_GPIOS
 #define AC_PRESENT_GPIO		(TPS6591X_GPIO_BASE + TPS6591X_GPIO_GP4)
@@ -865,7 +865,7 @@ static void utmi_phy_clk_disable(struct tegra_usb_phy *phy)
 	val |= HOSTPC1_DEVLC_PHCD;
 	writel(val, base + HOSTPC1_DEVLC);
 #endif
-	if (phy->instance == 2) {
+	if (phy->hotplug) {
 		val = readl(base + USB_SUSP_CTRL);
 		val |= USB_PHY_CLK_VALID_INT_ENB;
 		writel(val, base + USB_SUSP_CTRL);
@@ -1482,7 +1482,7 @@ static int utmi_phy_power_off(struct tegra_usb_phy *phy, bool is_dpd)
 		writel(val, base + UTMIP_BAT_CHRG_CFG0);
 	}
 
-	if (phy->instance != 2) {
+	if (!phy->hotplug) {
 		val = readl(base + UTMIP_XCVR_CFG0);
 		val |= (UTMIP_FORCE_PD_POWERDOWN | UTMIP_FORCE_PD2_POWERDOWN |
 			 UTMIP_FORCE_PDZI_POWERDOWN);
@@ -1512,7 +1512,7 @@ static int utmi_phy_power_off(struct tegra_usb_phy *phy, bool is_dpd)
 
 	utmi_phy_clk_disable(phy);
 
-	utmip_pad_power_off(phy, true);
+	utmip_pad_power_off(phy, is_dpd);
 	return 0;
 }
 
@@ -2328,6 +2328,7 @@ static int uhsic_phy_power_on(struct tegra_usb_phy *phy, bool is_dpd)
 #endif
 
 	if (uhsic_config->enable_gpio != -1) {
+		baseband_xmm_enable_hsic_power(1);
 		gpio_set_value_cansleep(uhsic_config->enable_gpio, 1);
 		/* keep hsic reset asserted for 1 ms */
 		udelay(1000);
@@ -2453,10 +2454,15 @@ static int uhsic_phy_power_off(struct tegra_usb_phy *phy, bool is_dpd)
 	writel(val, base + USB_SUSP_CTRL);
 	udelay(30);
 
+	val = readl(base + USB_SUSP_CTRL);
+	val &= ~UHSIC_PHY_ENABLE;
+	writel(val, base + USB_SUSP_CTRL);
+
 	if (uhsic_config->enable_gpio != -1) {
 		gpio_set_value_cansleep(uhsic_config->enable_gpio, 0);
 		/* keep hsic reset de-asserted for 1 ms */
 		udelay(1000);
+		baseband_xmm_enable_hsic_power(0);
 	}
 	if (uhsic_config->post_phy_off && uhsic_config->post_phy_off())
 		return -EAGAIN;
@@ -2512,7 +2518,8 @@ struct tegra_usb_phy *tegra_usb_phy_open(int instance, void __iomem *regs,
 	struct tegra_ulpi_config *uhsic_config;
 	int reset_gpio, enable_gpio;
 #endif
-	unsigned int pcb_id_version;
+	unsigned int pcb_id_version = grouper_query_pcba_revision();
+	unsigned int project_id = grouper_get_project_id();
 	int pmu_hw = grouper_query_pmic_id();
 
 	phy = kzalloc(sizeof(struct tegra_usb_phy), GFP_KERNEL);
@@ -2576,11 +2583,15 @@ struct tegra_usb_phy *tegra_usb_phy_open(int instance, void __iomem *regs,
 		err = utmip_pad_open(phy);
 		phy->xcvr_setup_value = tegra_phy_xcvr_setup_value(phy->config);
 		if (phy->instance == 0) {
-			pcb_id_version = grouper_query_pcba_revision();
-			if (pcb_id_version > 0x2)
+			if (project_id == GROUPER_PROJECT_NAKASI) {
+				if (pcb_id_version > 0x2)
+					phy->xcvr_setup_value = phy->xcvr_setup_value + 4;
+				else
+					phy->xcvr_setup_value = phy->xcvr_setup_value + 2;
+			}
+			else if (project_id == GROUPER_PROJECT_BACH) {
 				phy->xcvr_setup_value = phy->xcvr_setup_value + 4;
-			else
-				phy->xcvr_setup_value = phy->xcvr_setup_value + 2;
+			}
 
 			if (phy->xcvr_setup_value > 63)
 				phy->xcvr_setup_value = 63;

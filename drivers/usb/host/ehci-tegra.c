@@ -23,6 +23,7 @@
 #include <linux/usb/otg.h>
 #include <mach/usb_phy.h>
 #include <mach/iomap.h>
+#include <mach/board-grouper-misc.h>
 
 #define TEGRA_USB_PORTSC_PHCD		(1 << 23)
 
@@ -55,6 +56,9 @@
 #define USB1_PREFETCH_ID               6
 #define USB2_PREFETCH_ID               18
 #define USB3_PREFETCH_ID               17
+
+extern void baseband_xmm_L3_resume_check(void);
+static struct usb_hcd *modem_ehci_handle;
 
 struct tegra_ehci_hcd {
 	struct ehci_hcd *ehci;
@@ -197,7 +201,6 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 			val &= ~TEGRA_USB_PHY_CLK_VALID_INT_ENB |
 				TEGRA_USB_PHY_CLK_VALID_INT_STS;
 			writel(val , (hcd->regs + TEGRA_USB_SUSP_CTRL_OFFSET));
-
 			val = readl(&hw->status);
 			if (!(val  & STS_PCD)) {
 				spin_unlock(&ehci->lock);
@@ -207,12 +210,18 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 			val &= ~(TEGRA_USB_PORTSC1_WKCN | PORT_RWC_BITS);
 			writel(val , (hcd->regs + TEGRA_USB_PORTSC1_OFFSET));
 		}
+		else if (tegra->bus_suspended &&
+				tegra->port_speed > TEGRA_USB_PHY_PORT_SPEED_HIGH) {
+			printk("%s: no device connected before suspend\n", __func__);
+			spin_unlock(&ehci->lock);
+			return 0;
+		}
 		spin_unlock(&ehci->lock);
 	}
 
 	irq_status = ehci_irq(hcd);
 
-	if (pmc_remote_wakeup) {
+	if (pmc_remote_wakeup || tegra->phy->usb_phy_type == TEGRA_USB_PHY_TYPE_HSIC) {
 		ehci->controller_remote_wakeup = false;
 	}
 
@@ -760,6 +769,18 @@ static void tegra_ehci_disable_phy_interrupt(struct usb_hcd *hcd) {
 	}
 }
 
+void tegra_usb_suspend_hsic(void)
+{
+	tegra_usb_suspend(modem_ehci_handle ,false);
+}
+EXPORT_SYMBOL(tegra_usb_suspend_hsic);
+
+void tegra_usb_resume_hsic(void)
+{
+	tegra_usb_resume(modem_ehci_handle ,false);
+}
+EXPORT_SYMBOL(tegra_usb_resume_hsic);
+
 static void tegra_ehci_shutdown(struct usb_hcd *hcd)
 {
 	struct tegra_ehci_hcd *tegra = dev_get_drvdata(hcd->self.controller);
@@ -1213,6 +1234,10 @@ static int tegra_ehci_probe(struct platform_device *pdev)
 		tegra->irq = 0;
 	}
 
+	if (instance == 1) {
+		modem_ehci_handle = hcd;
+	}
+
 	return err;
 
 fail:
@@ -1248,6 +1273,10 @@ static int tegra_ehci_resume(struct platform_device *pdev)
 	struct tegra_ehci_hcd *tegra = platform_get_drvdata(pdev);
 	struct usb_hcd *hcd = ehci_to_hcd(tegra->ehci);
 	int ret;
+	u32 project_info = grouper_get_project_id();
+
+	if (project_info == GROUPER_PROJECT_NAKASI_3G)
+		baseband_xmm_L3_resume_check();
 
 	mutex_lock(&tegra->tegra_ehci_hcd_mutex);
 	if ((tegra->bus_suspended) && (tegra->power_down_on_bus_suspend)) {
@@ -1323,6 +1352,9 @@ static int tegra_ehci_remove(struct platform_device *pdev)
 		otg_put_transceiver(tegra->transceiver);
 	}
 #endif
+	if (tegra->phy->instance == 1) {
+		modem_ehci_handle = NULL;
+	}
 
 	/* Turn Off Interrupts */
 	ehci_writel(tegra->ehci, 0, &tegra->ehci->regs->intr_enable);
@@ -1332,6 +1364,7 @@ static int tegra_ehci_remove(struct platform_device *pdev)
 	usb_remove_hcd(hcd);
 	usb_put_hcd(hcd);
 	tegra_usb_phy_power_off(tegra->phy, true);
+	tegra_ehci_disable_phy_interrupt(hcd);
 	tegra_usb_phy_close(tegra->phy);
 	iounmap(hcd->regs);
 

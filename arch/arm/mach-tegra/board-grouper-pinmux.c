@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <mach/pinmux.h>
+#include <mach/board-grouper-misc.h>
 #include "board.h"
 #include "board-grouper.h"
 #include "gpio-names.h"
@@ -240,15 +241,38 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	DEFAULT_PINMUX(KB_ROW0,         RSVD,            PULL_UP,   NORMAL,     OUTPUT),
 
 	/* Start of PCBID pins */
+	/* PCB_ID0 */
+	DEFAULT_PINMUX(KB_ROW4, KBC, NORMAL, TRISTATE, INPUT),
+	/* PCB_ID1 */
+	DEFAULT_PINMUX(KB_ROW5, KBC, NORMAL, TRISTATE, INPUT),
+	/* PCB_ID2 */
+	DEFAULT_PINMUX(KB_COL4, KBC, NORMAL, TRISTATE, INPUT),
 	/* PCB_ID3 */
 	DEFAULT_PINMUX(KB_COL7, KBC, NORMAL, TRISTATE, INPUT),
 	/* PCB_ID4 */
 	DEFAULT_PINMUX(KB_ROW2, KBC, NORMAL, TRISTATE, INPUT),
 	/* PCB_ID5 */
 	DEFAULT_PINMUX(KB_COL5, KBC, NORMAL, TRISTATE, INPUT),
+	/* PCB_ID6 */
+	DEFAULT_PINMUX(GMI_CS0_N, RSVD1, NORMAL, TRISTATE, INPUT),
+	/* PCB_ID7 */
+	DEFAULT_PINMUX(GMI_CS1_N, RSVD1, NORMAL, TRISTATE, INPUT),
 	/* PCB_ID8 */
 	DEFAULT_PINMUX(GMI_CS2_N, RSVD1, NORMAL, TRISTATE, INPUT),
+	/* PCB_ID9 */
+	DEFAULT_PINMUX(GMI_WP_N, RSVD1, NORMAL, TRISTATE, INPUT),
 	/* End of PCBID pins */
+
+	/* Start of PROJECTID pins */
+	/* PROJECT_ID0 (aka PCB_ID10) */
+	DEFAULT_PINMUX(GMI_CS4_N, RSVD1, NORMAL, TRISTATE, INPUT),
+	/* PROJECT_ID1 (aka PCB_ID11) */
+	DEFAULT_PINMUX(GMI_CS6_N, GMI, NORMAL, TRISTATE, INPUT),
+	/* PROJECT_ID2 (aka PCB_ID12) */
+	DEFAULT_PINMUX(GMI_WAIT, RSVD1, NORMAL, TRISTATE, INPUT),
+	/* PROJECT_ID3 (aka PCB_ID13) */
+	DEFAULT_PINMUX(GMI_CS3_N, RSVD1, NORMAL, TRISTATE, INPUT),
+	/* End of PROJECTID pins */
 
 	/* PWR Key */
 	DEFAULT_PINMUX(GPIO_PV0,        RSVD,            PULL_UP,   TRISTATE,     INPUT),
@@ -319,8 +343,6 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	DEFAULT_PINMUX(GPIO_PBB6,       VGP6,            NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(GPIO_PBB7,       I2S4,            NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(GPIO_PCC2,       I2S4,            NORMAL,    NORMAL,     INPUT),
-	DEFAULT_PINMUX(KB_ROW4,         KBC,             NORMAL,    NORMAL,     OUTPUT),
-	DEFAULT_PINMUX(KB_ROW5,         KBC,             NORMAL,    NORMAL,     OUTPUT),
 	DEFAULT_PINMUX(KB_ROW9,         KBC,             NORMAL,    NORMAL,     OUTPUT),
 	DEFAULT_PINMUX(KB_ROW10,        KBC,             NORMAL,    NORMAL,     OUTPUT),
 
@@ -332,7 +354,10 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	DEFAULT_PINMUX(GPIO_PU1,        RSVD1,           NORMAL,    NORMAL,     OUTPUT),
 	DEFAULT_PINMUX(GPIO_PU2,        RSVD1,           NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(GPIO_PU3,        RSVD1,           NORMAL,    NORMAL,     INPUT),
-	DEFAULT_PINMUX(GPIO_PU4,        PWM1,            NORMAL,    NORMAL,     OUTPUT),
+
+	/* DOCK_IN# */
+	DEFAULT_PINMUX(GPIO_PU4,        PWM1,            NORMAL,   TRISTATE,     INPUT),
+
 	DEFAULT_PINMUX(GPIO_PU5,        PWM2,            NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(GPIO_PU6,        RSVD1,           NORMAL,    NORMAL,     INPUT),
 	//DEFAULT_PINMUX(KB_ROW14,        KBC,             NORMAL,    TRISTATE,   OUTPUT),
@@ -349,8 +374,6 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	DEFAULT_PINMUX(GMI_AD11,        PWM3,            NORMAL,    NORMAL,     OUTPUT),
 
 	/* TOUCH */
-	DEFAULT_PINMUX(GMI_WAIT,        RSVD1,           PULL_UP,   NORMAL,     INPUT),
-	DEFAULT_PINMUX(GMI_WP_N,        RSVD1,           PULL_UP,   NORMAL,     INPUT),
 	DEFAULT_PINMUX(LCD_SDOUT,       DISPLAYA,        NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(LCD_DC1,         DISPLAYA,        NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(LCD_WR_N,        DISPLAYA,        PULL_UP,   NORMAL,     INPUT),
@@ -361,7 +384,6 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	/* CODEC */
 	DEFAULT_PINMUX(SPI2_SCK,        SPI2,            NORMAL,    NORMAL,     INPUT),
 	DEFAULT_PINMUX(SPI2_CS1_N,      SPI2,            NORMAL,    NORMAL,     INPUT),
-	DEFAULT_PINMUX(GMI_CS3_N,       RSVD1,           NORMAL,    NORMAL,     INPUT),
 
 	/* HALL SENSOR, LID# */
 	DEFAULT_PINMUX(KB_ROW14,        KBC,             NORMAL,    TRISTATE,   INPUT),
@@ -402,6 +424,33 @@ static __initdata struct tegra_pingroup_config grouper_pinmux_common[] = {
 	DEFAULT_PINMUX(ULPI_DATA3,      ULPI,            NORMAL,    NORMAL,     INPUT),
 };
 
+static __initdata struct tegra_pingroup_config pinmux_grouper3g[] = {
+	DEFAULT_PINMUX(LCD_DC1,         DISPLAYA,        PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(LCD_PWR2,        DISPLAYA,        PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(SPI2_CS2_N,      SPI2,            PULL_UP,      NORMAL,     INPUT),
+	DEFAULT_PINMUX(DAP3_DIN,        I2S2,            PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(SPI1_SCK,        SPI1,            PULL_UP,      NORMAL,     INPUT),
+	DEFAULT_PINMUX(GPIO_PU5,        PWM2,            PULL_DOWN,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(SPI1_MISO,       SPI1,            PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(SPI2_MOSI,       SPI2,            PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(CLK3_REQ,        DEV3,            PULL_DOWN,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(ULPI_NXT,        UARTD,           PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(ULPI_STP,        UARTD,           PULL_DOWN,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(KB_ROW7,         KBC,             PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(GPIO_PU4,        PWM1,            PULL_DOWN,   NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(GPIO_PU3,        RSVD1,           PULL_DOWN,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(DAP1_FS,         I2S0,            NORMAL,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(DAP1_DIN,        I2S0,            NORMAL,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(DAP1_DOUT,       I2S0,            NORMAL,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(DAP1_SCLK,       I2S0,            NORMAL,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(KB_ROW15,        KBC,             NORMAL,    NORMAL,     INPUT),
+	DEFAULT_PINMUX(DAP3_FS,         I2S2,            NORMAL,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(DAP3_SCLK,       I2S2,            NORMAL,    NORMAL,     OUTPUT),
+	DEFAULT_PINMUX(KB_ROW3,         KBC,             PULL_UP,      NORMAL,     INPUT), // SAR_DET#_3G
+	DEFAULT_PINMUX(KB_ROW13,        KBC,             PULL_UP,      NORMAL,     INPUT), // SAR_DET#_3G
+};
+
+
 /*Do not use for now*/
 static __initdata struct tegra_pingroup_config unused_pins_lowpower[] = {
 	/*
@@ -422,10 +471,6 @@ static __initdata struct tegra_pingroup_config unused_pins_lowpower[] = {
 	DEFAULT_PINMUX(GMI_AD13,        RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(CLK1_REQ,        DAP,           NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(GMI_ADV_N,       RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
-	DEFAULT_PINMUX(GMI_CS0_N,       RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
-	DEFAULT_PINMUX(GMI_CS1_N,       RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
-	DEFAULT_PINMUX(GMI_CS4_N,       RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
-	DEFAULT_PINMUX(GMI_CS6_N,       NAND,          NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(GMI_CS7_N,       NAND,          NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(GMI_OE_N,        RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(GMI_WR_N,        RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
@@ -439,7 +484,6 @@ static __initdata struct tegra_pingroup_config unused_pins_lowpower[] = {
 	DEFAULT_PINMUX(GPIO_PV2,        OWR,           NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(GPIO_PV3,        RSVD1,         NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(HDMI_CEC,        CEC,           NORMAL,    TRISTATE,   OUTPUT),
-	DEFAULT_PINMUX(KB_COL4,         KBC,           NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(KB_COL5,         KBC,           NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(KB_COL6,         KBC,           NORMAL,    TRISTATE,   OUTPUT),
 	DEFAULT_PINMUX(KB_COL7,         KBC,           NORMAL,    TRISTATE,   OUTPUT),
@@ -480,9 +524,14 @@ static __initdata struct tegra_pingroup_config unused_pins_lowpower[] = {
 
 static void __init grouper_pinmux_audio_init(void)
 {
-	tegra_gpio_enable(TEGRA_GPIO_CDC_IRQ);
-	gpio_request(TEGRA_GPIO_CDC_IRQ, "rt5640");
-	gpio_direction_input(TEGRA_GPIO_CDC_IRQ);
+	u32 project_info = grouper_get_project_id();
+
+	if (project_info != GROUPER_PROJECT_NAKASI_3G) {
+		// TEGRA_GPIO_PW3 is needed by SIM detection.
+		tegra_gpio_enable(TEGRA_GPIO_CDC_IRQ);
+		gpio_request(TEGRA_GPIO_CDC_IRQ, "rt5640");
+		gpio_direction_input(TEGRA_GPIO_CDC_IRQ);
+	}
 
 	tegra_gpio_enable(TEGRA_GPIO_HP_DET);
 	tegra_gpio_enable(TEGRA_GPIO_INT_MIC_EN);
@@ -503,14 +552,46 @@ static struct gpio_init_pin_info init_gpio_mode_grouper_common[] = {
 	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PR0, false, 0),
 };
 
+static struct gpio_init_pin_info init_gpio_mode_grouper3g[] = {
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PDD7, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PCC6, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PR0, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PD2, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PC6, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PW3, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PP1, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PX5, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PU5, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PX7, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PX0, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PEE1, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PY2, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PY3, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PR7, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PU4, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PU3, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PN1, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PN2, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PN0, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PN3, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PR3, false, 0),
+	GPIO_INIT_PIN_MODE(TEGRA_GPIO_PS5, false, 0),
+};
+
 static void __init grouper_gpio_init_configure(void)
 {
 	int len;
 	int i;
 	struct gpio_init_pin_info *pins_info;
+	u32 project_info = grouper_get_project_id();
 
-	len = ARRAY_SIZE(init_gpio_mode_grouper_common);
-	pins_info = init_gpio_mode_grouper_common;
+	if (project_info == GROUPER_PROJECT_NAKASI_3G) {
+		len = ARRAY_SIZE(init_gpio_mode_grouper3g);
+		pins_info = init_gpio_mode_grouper3g;
+	} else {
+		len = ARRAY_SIZE(init_gpio_mode_grouper_common);
+		pins_info = init_gpio_mode_grouper_common;
+	}
 
 	for (i = 0; i < len; ++i) {
 		tegra_gpio_init_configure(pins_info->gpio_nr,
@@ -522,6 +603,8 @@ static void __init grouper_gpio_init_configure(void)
 int __init grouper_pinmux_init(void)
 {
 	struct board_info board_info;
+	u32 project_info = grouper_get_project_id();
+
 	tegra_get_board_info(&board_info);
 	BUG_ON(board_info.board_id != BOARD_E1565);
 	grouper_gpio_init_configure();
@@ -529,6 +612,11 @@ int __init grouper_pinmux_init(void)
 	tegra_pinmux_config_table(grouper_pinmux_common, ARRAY_SIZE(grouper_pinmux_common));
 	tegra_drive_pinmux_config_table(grouper_drive_pinmux,
 					ARRAY_SIZE(grouper_drive_pinmux));
+
+	if (project_info == GROUPER_PROJECT_NAKASI_3G) {
+		tegra_pinmux_config_table(pinmux_grouper3g,
+				ARRAY_SIZE(pinmux_grouper3g));
+	}
 
 	tegra_pinmux_config_table(unused_pins_lowpower,
 		ARRAY_SIZE(unused_pins_lowpower));
@@ -547,10 +635,7 @@ int __init grouper_pinmux_init(void)
 	}
 
 struct gpio_init_pin_info pin_lpm_grouper_common[] = {
-	PIN_GPIO_LPM("GMI_CS4_N", TEGRA_GPIO_PK2, 1, 0),
 	PIN_GPIO_LPM("GMI_CS7",   TEGRA_GPIO_PI6, 1, 0),
-	PIN_GPIO_LPM("GMI_CS0",   TEGRA_GPIO_PJ0, 1, 0),
-	PIN_GPIO_LPM("GMI_CS1",   TEGRA_GPIO_PJ2, 1, 0),
 };
 
 static void set_unused_pin_gpio(struct gpio_init_pin_info *lpm_pin_info,

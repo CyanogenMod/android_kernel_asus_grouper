@@ -45,8 +45,6 @@
 MODULE_DESCRIPTION("Headset detection driver");
 MODULE_LICENSE("GPL");
 
-#define UART_DETECTION (false)
-
 #define DEFAULT_PINMUX(_pingroup, _mux, _pupd, _tri, _io)       \
         {                                                       \
                 .pingroup       = TEGRA_PINGROUP_##_pingroup,   \
@@ -69,16 +67,20 @@ static void 		detection_work(struct work_struct *work);
 static int               	jack_config_gpio(void);
 static irqreturn_t   	lineout_irq_handler(int irq, void *dev_id);
 static void 		lineout_work_queue(struct work_struct *work);
-static int               	lineout_config_gpio(void);
+static void		dock_work_queue(struct work_struct *work);
+static int               	lineout_config_gpio(u32 project_info);
 static void 		detection_work(struct work_struct *work);
 static int               	btn_config_gpio(void);
 static int                      switch_config_gpio(void);
 int 			hs_micbias_power(int on);
+static irqreturn_t	dockin_irq_handler(int irq, void *dev_id);
+static void		audio_dock_switch(void);
 /*----------------------------------------------------------------------------
 ** GLOBAL VARIABLES
 **----------------------------------------------------------------------------*/
 #define JACK_GPIO		(TEGRA_GPIO_PW2)
-#define LINEOUT_GPIO	(TEGRA_GPIO_PW3)
+#define LINEOUT_GPIO_NAKASI	(TEGRA_GPIO_PW3)
+#define LINEOUT_GPIO_BACH	(TEGRA_GPIO_PX6)
 #define HOOK_GPIO		(TEGRA_GPIO_PX2)
 #define UART_HEADPHONE_SWITCH (TEGRA_GPIO_PS2)
 #define ON	(1)
@@ -110,7 +112,26 @@ static DECLARE_WORK(g_detection_work, detection_work);
 extern struct snd_soc_codec *rt5640_audio_codec;
 struct work_struct headset_work;
 struct work_struct lineout_work;
+struct work_struct dock_work;
+static bool UART_enable = false;
 static unsigned int revision;
+static u32 lineout_gpio;
+static int gpio_dock_in = 0;
+
+static ssize_t dock_status_show(struct device *dev,struct device_attribute *attr, char *buf)
+{
+	int dock_status = 0;
+	
+	if(gpio_get_value(gpio_dock_in))
+		dock_status = 0;
+	else
+		dock_status = 1;
+
+	return sprintf(buf, "%d\n", dock_status);
+}
+
+DEVICE_ATTR(dock_status, S_IRUGO, dock_status_show, NULL);
+
 static ssize_t headset_name_show(struct switch_dev *sdev, char *buf)
 {
 	switch (switch_get_state(&hs_data->sdev)){
@@ -197,7 +218,11 @@ static void disable_uart(void)
 }
 static void insert_headset(void)
 {
-	if(gpio_get_value(LINEOUT_GPIO) == 0 && revision != GROUPER_PCBA_SR3 && UART_DETECTION){
+        struct snd_soc_dapm_context *dapm;
+
+        dapm = &rt5640_audio_codec->dapm;
+
+	if(gpio_get_value(lineout_gpio) == 0 && UART_enable){
                 printk("%s: debug board\n", __func__);
                 switch_set_state(&hs_data->sdev, NO_DEVICE);
                 hs_micbias_power(OFF);
@@ -208,37 +233,30 @@ static void insert_headset(void)
 		printk("%s: headphone\n", __func__);
 		switch_set_state(&hs_data->sdev, HEADSET_WITHOUT_MIC);
 		hs_micbias_power(OFF);
-		if((revision == GROUPER_PCBA_SR3) || (revision == GROUPER_PCBA_ER1)){
-			disable_uart();
-			printk("%s: SR3 or ER1\n", __func__);
-		}
 		pulldown_uart();
 		gpio_direction_output(UART_HEADPHONE_SWITCH, 1);
 		headset_alive = false;
+		snd_soc_dapm_disable_pin(dapm, "Int Spk");
+		snd_soc_dapm_disable_pin(dapm, "AUX");
+		snd_soc_dapm_sync(dapm);
 	}else{
 		printk("%s: headset\n", __func__);
 		switch_set_state(&hs_data->sdev, HEADSET_WITHOUT_MIC);
 		hs_micbias_power(ON);
-		if((revision == GROUPER_PCBA_SR3) || (revision == GROUPER_PCBA_ER1)){
-			disable_uart();
-			printk("%s: SR3 or ER1\n", __func__);
-		}
 		pulldown_uart();
 		gpio_direction_output(UART_HEADPHONE_SWITCH, 1);
 		headset_alive = true;
+		snd_soc_dapm_disable_pin(dapm, "Int Spk");
+		snd_soc_dapm_disable_pin(dapm, "AUX");
+		snd_soc_dapm_sync(dapm);
 	}
 	hs_data->debouncing_time = ktime_set(0, 100000000);  /* 100 ms */
 }
-
 static void remove_headset(void)
 {
 	switch_set_state(&hs_data->sdev, NO_DEVICE);
 	hs_data->debouncing_time = ktime_set(0, 100000000);  /* 100 ms */
 	headset_alive = false;
-	if((revision == GROUPER_PCBA_SR3) || (revision == GROUPER_PCBA_ER1)){
-		printk("%s: SR3 or ER1\n", __func__);
-		enable_uart();
-	}
 	tristate_uart();
 	gpio_direction_output(UART_HEADPHONE_SWITCH, 0);
 }
@@ -353,14 +371,19 @@ static void lineout_work_queue(struct work_struct *work)
 {
 	msleep(300);
 
-	if (gpio_get_value(LINEOUT_GPIO) == 0){
+	if (gpio_get_value(lineout_gpio) == 0){
 		printk("LINEOUT: LineOut inserted\n");
 		lineout_alive = true;
-	}else if(gpio_get_value(LINEOUT_GPIO)){
+	}else if(gpio_get_value(lineout_gpio)){
 		printk("LINEOUT: LineOut removed\n");
 		lineout_alive = false;
 	}
 
+}
+
+static void dock_work_queue(struct work_struct *work)
+{
+		audio_dock_switch();
 }
 
 /**********************************************************
@@ -369,19 +392,22 @@ static void lineout_work_queue(struct work_struct *work)
 **  Return value: IRQ_HANDLED
 **
 ************************************************************/
-static int lineout_config_gpio()
+static int lineout_config_gpio(u32 project_info)
 {
 	int ret;
 
 	printk("HEADSET: Config LineOut detection gpio\n");
-
-	tegra_gpio_enable(LINEOUT_GPIO);
-	ret = gpio_request(LINEOUT_GPIO, "lineout_int");
-	ret = gpio_direction_input(LINEOUT_GPIO);
+	if(project_info == GROUPER_PROJECT_BACH)
+		lineout_gpio = LINEOUT_GPIO_BACH;
+	else if(project_info == GROUPER_PROJECT_NAKASI)
+		lineout_gpio = LINEOUT_GPIO_NAKASI;
+	tegra_gpio_enable(lineout_gpio);
+	ret = gpio_request(lineout_gpio, "lineout_int");
+	ret = gpio_direction_input(lineout_gpio);
 #if 0
 	ret = request_irq(gpio_to_irq(LINEOUT_GPIO), &lineout_irq_handler, IRQF_TRIGGER_FALLING|IRQF_TRIGGER_RISING, "lineout_int", 0);
 #endif
-	if (gpio_get_value(LINEOUT_GPIO) == 0)
+	if (gpio_get_value(lineout_gpio) == 0)
 		lineout_alive = true;
 	else
 		lineout_alive = false;
@@ -399,6 +425,61 @@ static int switch_config_gpio()
         ret = gpio_request(UART_HEADPHONE_SWITCH, "uart_headphone_switch");
 
         return 0;
+}
+
+static int dockin_config_gpio()
+{
+	int ret = 0;
+	int irq_num = 0;
+
+	irq_num = gpio_to_irq(gpio_dock_in);
+	ret = request_irq(irq_num, dockin_irq_handler,
+		IRQF_TRIGGER_FALLING|IRQF_TRIGGER_RISING | IRQF_SHARED, "dock_detect", hs_data);
+	if(ret < 0)
+		printk("%s: request irq fail errno = %d\n", __func__, ret);
+
+        return ret;
+}
+
+static void audio_dock_switch(void)
+{
+
+	struct snd_soc_dapm_context *dapm;
+
+	dapm = &rt5640_audio_codec->dapm;
+
+	if(!gpio_get_value(gpio_dock_in)){
+		/* Change route to dock if current output device is spk */
+		if(snd_soc_dapm_get_pin_status(dapm, "Int Spk")){
+                        snd_soc_dapm_disable_pin(dapm, "Int Spk");
+                        snd_soc_dapm_enable_pin(dapm, "AUX");
+			snd_soc_update_bits(rt5640_audio_codec,
+				RT5640_DIG_INF_DATA, RT5640_IF1_DAC_SEL_MASK,
+				0x0000);
+			snd_soc_dapm_sync(dapm);
+		}else{
+			snd_soc_dapm_disable_pin(dapm, "AUX");
+			snd_soc_dapm_sync(dapm);
+		}
+	}else{
+		if(!snd_soc_dapm_get_pin_status(dapm, "Headphone Jack")){
+			snd_soc_dapm_enable_pin(dapm, "Int Spk");
+			snd_soc_update_bits(rt5640_audio_codec,
+                                RT5640_DIG_INF_DATA, RT5640_IF1_DAC_SEL_MASK,
+                                0x4000);
+		}
+		snd_soc_dapm_disable_pin(dapm, "AUX");
+		snd_soc_dapm_sync(dapm);
+	}
+
+}
+
+static irqreturn_t dockin_irq_handler(int irq, void *dev_id)
+{
+	printk("%s\n", __func__);
+	schedule_work(&dock_work);
+
+        return IRQ_HANDLED;
 }
 
 /**********************************************************
@@ -491,10 +572,22 @@ EXPORT_SYMBOL(hs_micbias_power);
 ************************************************************/
 static int __init headset_init(void)
 {
+	u32 project_info = grouper_get_project_id();
+	u32 pmic_id = grouper_query_pmic_id();
+
 	printk(KERN_INFO "%s+ #####\n", __func__);
 	int ret;
 
 	printk("HEADSET: Headset detection init\n");
+
+	if (project_info == GROUPER_PROJECT_BACH)
+		gpio_dock_in = TEGRA_GPIO_PO5;
+	else
+		gpio_dock_in = TEGRA_GPIO_PU4;
+
+	if(project_info == GROUPER_PROJECT_BACH ||
+		(project_info == GROUPER_PROJECT_NAKASI && pmic_id ==GROUPER_PMIC_TI))
+		UART_enable = true;
 
 	revision = grouper_query_pcba_revision();
 
@@ -511,17 +604,27 @@ static int __init headset_init(void)
 	if (ret < 0)
 		goto err_switch_dev_register;
 
+	
+        ret = device_create_file(rt5640_audio_codec->dev, &dev_attr_dock_status);
+        if (ret != 0) {
+                dev_err(rt5640_audio_codec->dev,
+                        "Failed to create dock status: %d\n", ret);
+                goto err_switch_dev_register;
+        }
+
 	g_detection_work_queue = create_workqueue("detection");
 
 	hrtimer_init(&hs_data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hs_data->timer.function = detect_event_timer_func;
 
 	printk("HEADSET: Headset detection mode\n");
+	lineout_config_gpio(project_info);
 	btn_config_gpio();/*Config hook detection GPIO*/
 	switch_config_gpio(); /*Config uart and headphone switch*/
 	jack_config_gpio();/*Config jack detection GPIO*/
 	INIT_WORK(&lineout_work, lineout_work_queue);
-	lineout_config_gpio();
+	INIT_WORK(&dock_work, dock_work_queue);
+	dockin_config_gpio();
 
 	printk(KERN_INFO "%s- #####\n", __func__);
 	return 0;
@@ -545,7 +648,7 @@ static void __exit headset_exit(void)
 		remove_headset();
 	gpio_free(JACK_GPIO);
 	gpio_free(HOOK_GPIO);
-	gpio_free(LINEOUT_GPIO);
+	gpio_free(lineout_gpio);
 
 	free_irq(hs_data->irq, 0);
 	destroy_workqueue(g_detection_work_queue);

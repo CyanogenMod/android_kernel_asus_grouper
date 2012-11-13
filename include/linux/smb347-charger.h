@@ -24,6 +24,7 @@
 #define __LINUX_smb347_CHARGER_H
 
 #include <linux/regulator/machine.h>
+#include <linux/wakelock.h>
 
 #define SMB_DEBUG			0
 #if SMB_DEBUG
@@ -57,7 +58,7 @@ enum charger_type {
 enum cable_type {
 	non_cable =0,
 	usb_cable,
-	TBD,
+	unknow_cable,
 	ac_cable,
 };
 
@@ -68,14 +69,23 @@ struct smb347_charger {
 	struct i2c_client	*client;
 	struct device	*dev;
 	struct delayed_work	inok_isr_work;
-	struct delayed_work	stat_isr_work;
-	struct delayed_work	regs_dump_work;
+	struct delayed_work	dockin_isr_work;
+	struct delayed_work	cable_det_work;
+	struct wake_lock 	wake_lock_dockin;
 	struct mutex		cable_lock;
+	struct mutex		dockin_lock;
 	void	*charger_cb_data;
 	enum charging_states state;
 	enum charger_type chrg_type;
 	charging_callback_t	charger_cb;
 	int suspend_ongoing;
+	enum cable_type cur_cable_type;
+	enum cable_type old_cable_type;
+	struct delayed_work curr_limit_work;
+	struct delayed_work test_fail_clear_work;
+	unsigned long time_of_1800mA_limit;
+	unsigned char test_1800mA_fail;
+	unsigned int curr_limit;
 };
 
 int smb347_battery_online(void);
