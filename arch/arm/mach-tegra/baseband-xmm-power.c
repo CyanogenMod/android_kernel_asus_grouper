@@ -112,6 +112,9 @@ static bool modem_sleep_flag;
 static spinlock_t xmm_lock;
 static DEFINE_MUTEX(xmm_onoff_mutex);
 static int modem_reset_flag = 0;
+bool resume_from_l3 = false;
+
+#define MOD_HANG        TEGRA_GPIO_PN2
 
 static void baseband_xmm_power_reset_on(void);
 static void baseband_xmm_power_L2_resume(void);
@@ -119,6 +122,7 @@ static int baseband_xmm_power_driver_handle_resume(
 			struct baseband_power_platform_data *data);
 extern void tegra_usb_suspend_hsic(void);
 extern void tegra_usb_resume_hsic(void);
+extern void ril_change_modem_crash_mode(void);
 
 int baseband_xmm_enable_hsic_power(int enable)
 {
@@ -417,6 +421,8 @@ static ssize_t store_force_crash_modem(struct device *dev,
 	int state;
 	struct platform_device *device = to_platform_device(dev);
 	struct baseband_power_platform_data *data;
+	int value = 0;
+	int delay = 5;
 
 	sscanf(buf, "%d", &state);
 
@@ -434,9 +440,22 @@ static ssize_t store_force_crash_modem(struct device *dev,
 	}
 
 	if (state > 0) {
-		gpio_set_value(data->modem.xmm.ipc_bb_force_crash, 1);
-		msleep(50);
-		gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
+		do {
+			gpio_set_value(data->modem.xmm.ipc_bb_force_crash, 1);
+			msleep(50);
+			gpio_set_value(data->modem.xmm.ipc_hsic_active, 1);
+			msleep(50);
+			gpio_set_value(data->modem.xmm.ipc_hsic_active, 0);
+			msleep(50);
+			value = gpio_get_value(MOD_HANG);
+			delay--;
+		} while ((!value) && (delay));
+		if (delay)
+			pr_info("%s: modem crash is normal\n", __func__);
+		else {
+			pr_info("%s: modem crash is abnormal and force change the modem crash mode\n", __func__);
+			ril_change_modem_crash_mode();
+		}
 	}
 	pr_info("-- force_crash_modem --\n");
 
@@ -717,9 +736,11 @@ irqreturn_t baseband_xmm_power_ipc_ap_wake_irq(int irq, void *dev_id)
 							BBXMM_PS_L3TOL0))
 					baseband_xmm_set_power_status(
 							BBXMM_PS_L0);
-				else
+				else {
 					pr_info("%s:no state"
 						"change required\n", __func__);
+					resume_from_l3 = false;
+				}
 			}
 			/* save gpio state */
 			ipc_ap_wake_state = IPC_AP_WAKE_H;
@@ -1271,6 +1292,7 @@ static int baseband_xmm_power_driver_handle_resume(
 	}
 
 	modem_sleep_flag = false;
+	resume_from_l3 = true;
 
 	/* L3->L0 */
 	baseband_xmm_set_power_status(BBXMM_PS_L3TOL0);
