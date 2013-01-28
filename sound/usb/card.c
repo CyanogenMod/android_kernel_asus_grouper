@@ -479,7 +479,7 @@ snd_usb_audio_probe(struct usb_device *dev,
 		    le16_to_cpu(dev->descriptor.idProduct));
 	if (quirk && quirk->ifnum >= 0 && ifnum != quirk->ifnum)
 		goto __err_val;
-
+/*
     // tmtmtm: we don't want the USB DAC to become the primary sound card
     // in order for a USB DAC, connected at boot time, to become available as 
     // an *overlay* primary sound card, we must postpone device probe
@@ -497,7 +497,7 @@ snd_usb_audio_probe(struct usb_device *dev,
 		goto __err_val;
 	}
    	//printk("##### sound/usb/card.c REGISTER tv_sec=%d ++++++++++++++++++++++++\n",tp.tv_sec);
-
+*/
 
 	if (snd_usb_apply_boot_quirk(dev, intf, quirk) < 0)
 		goto __err_val;

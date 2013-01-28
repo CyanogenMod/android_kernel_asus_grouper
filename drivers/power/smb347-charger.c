@@ -131,7 +131,7 @@ static unsigned int pcba_ver;
 static int gpio_dock_in = 0;
 
 // tmtmtm: also modify 'export KBUILD_BUILD_USER=timur-usbhost-fi-2013-01-01
-static int fixed_install_mode = 0;
+static int fixed_install_mode = 1;
 volatile int smb347_deep_sleep = 0;  // imported by ehci-tegra.c
 static volatile int host_mode_charging_state = 0;
 static volatile int lastExternalPowerState = 0;
