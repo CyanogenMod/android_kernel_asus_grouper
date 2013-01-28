@@ -22,6 +22,9 @@ struct cfq_io_context {
 
 	struct cfq_ttime ttime;
 
+	unsigned int raising_time_left;
+	unsigned int saved_idle_window;
+
 	struct list_head queue_list;
 	struct hlist_node cic_list;
 
