@@ -632,7 +632,6 @@ static int tegra_usb_resume(struct usb_hcd *hcd, bool is_dpd)
 
     // tmtmtm: OTG PLUG
     // original intent: skip the default restart, if host_mode_charging is set
-    // FIXME: hier keine einschränkung auf fixed_install_mode?
 	//if(host_mode_charging_state) {
   	//	printk("ehci-tegra ######### tegra_usb_resume host_mode_charging: special\n");
     if(smb347_deep_sleep) {

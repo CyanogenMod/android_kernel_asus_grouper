@@ -504,4 +504,11 @@ config TEGRA_PREINIT_CLOCKS
 	help
 	  Preinitialize Tegra clocks to known states before actual full-
 	  scale clock initialization starts.
+
+config USBHOST
+	bool "USBHOST related runtime configuration"
+	default y
+	help
+	  A simple sysfs interface to allow switching between OTG and FI mode.
+
 endif
