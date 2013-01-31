@@ -132,7 +132,14 @@ static int gpio_dock_in = 0;
 
 // tmtmtm: also modify 'export KBUILD_BUILD_USER=timur-usbhost-fi-2013-01-01
 //static int fixed_install_mode = 0;
-extern int fixed_install_mode;
+extern int usbhost_fixed_install_mode;
+extern int usbhost_fastcharge_in_host_mode;
+// TODO: need select threads to dicover value changes
+// when usbhost_fixed_install_mode from 1 to 0: enable slave charging
+// when usbhost_fixed_install_mode from 0 to 1: disable slave charging
+// when usbhost_fastcharge_in_host_mode from 0 to 1: enable fast charging (when in host mode)
+// when usbhost_fastcharge_in_host_mode from 1 to 0: disable fast charging (when in host mode)
+
 volatile int smb347_deep_sleep = 0;  // imported by ehci-tegra.c
 static volatile int host_mode_charging_state = 0;
 static volatile int lastExternalPowerState = 0;
@@ -268,7 +275,7 @@ static int smb347_configure_otg(struct i2c_client *client, int enableOTG, int ch
 	}
 
 	// tmtmtm: we will never charge slave devices in fixed_install_mode
-	if(!fixed_install_mode) {
+	if(!usbhost_fixed_install_mode) {
 		if(chargeSlaves) {
 			if(!lastChargeSlaveDevicesState) {
 				/* Configure INOK to be active high */
@@ -325,7 +332,7 @@ static int smb347_configure_otg(struct i2c_client *client, int enableOTG, int ch
 	}
 
 	// tmtmtm: we will never charge slave devices in fixed_install_mode
-	if(!fixed_install_mode) {
+	if(!usbhost_fixed_install_mode) {
 		if(chargeSlaves) {
 			if(!lastChargeSlaveDevicesState) {
 				/* Change "OTG output current limit" from 250mA to 750mA */
@@ -405,7 +412,7 @@ static int smb347_configure_charger(struct i2c_client *client, int value)
 		*/
 	} else {
 		// tmtmtm: make sure to NEVER call this in fixed_install_mode
-		printk("smb347_configure_charger do not charge; fixed_install_mode=%d\n",fixed_install_mode);
+		printk("smb347_configure_charger do not charge; fixed_install_mode=%d\n",usbhost_fixed_install_mode);
 		ret = smb347_read(client, smb347_CMD_REG);
 		if (ret < 0) {
 			dev_err(&client->dev, "%s: err %d\n", __func__, ret);
@@ -466,6 +473,8 @@ smb347_set_InputCurrentlimit(struct i2c_client *client, u32 current_limit)
 
 	if (charger->curr_limit == current_limit)
 		return  ret;
+
+	printk("smb347_set_InputCurrentlimit %d\n",current_limit);
 
 	wake_lock(&charger_wakelock);
 	/* Enable volatile writes to registers */
@@ -874,11 +883,11 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 	int newExternalPowerState=0;
 
 	printk("smb347_otg_status from=%d to=%d lastOtgState=%d lastExternalPowerState=%d lastChargeSlaveDevicesState=%d fixed_install_mode=%d\n",
-		from,to,lastOtgState,lastExternalPowerState,lastChargeSlaveDevicesState,fixed_install_mode);
+		from,to,lastOtgState,lastExternalPowerState,lastChargeSlaveDevicesState,usbhost_fixed_install_mode);
 
     if(to==10) {
-    	// only when going suspend (OTG PULL)
-        // small sleep, so that ehci-tegra #### tegra_usb_resume can run first
+    	// prevent race condition bug: only when going suspend (OTG PULL)
+        // insert small sleep, so that ehci-tegra #### tegra_usb_resume can run first
         // and use host_mode_charging_state's current value (probably charging), 
         // before we call cable_type_detect() (when it will likely switch to not charging)
         // FIXME: but is tegra_usb_resume not only called on OTG PLUG?
@@ -895,7 +904,7 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 
 		if(!newExternalPowerState) {
 			// no external power
-			if(fixed_install_mode) {
+			if(usbhost_fixed_install_mode) {
 				// allow battery to be charged
 				printk("smb347_otg_status allow battery to be charged\n");
 				ret = smb347_configure_charger(client, 1);
@@ -925,6 +934,7 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 				printk("smb347_otg_status waiting for external power...\n");
 				// if power is detected, inok_isr_work_function will strike after aprox 1500 ms
 				schedule_timeout_interruptible(msecs_to_jiffies(500));
+				// FIXME: abort condition
 				schedule_timeout_interruptible(msecs_to_jiffies(500));
 				schedule_timeout_interruptible(msecs_to_jiffies(400));
 				schedule_timeout_interruptible(msecs_to_jiffies(400));
@@ -1057,7 +1067,7 @@ static int cable_type_detect(void)
 
 			// tmtmtm
 			charger->cur_cable_type = ac_cable;
-			if(fixed_install_mode) {
+			if(usbhost_fixed_install_mode) {
 				host_mode_charging_state = 1;
 				printk(KERN_INFO "cable_type_detect() enabled host_mode_charging_state on DC_IN ######\n");
 			}
@@ -1080,6 +1090,7 @@ static int cable_type_detect(void)
 	                                    touch_callback(ac_cable);
 #endif
 					} else if (retval == APSD_DCP) {
+					    // Asus power supply
 						printk(KERN_INFO "Cable: DCP\n");
 						charger->cur_cable_type = ac_cable;
 						success = battery_callback(ac_cable);
@@ -1101,13 +1112,24 @@ static int cable_type_detect(void)
 	                                    touch_callback(usb_cable);
 #endif
 					} else if(retval == APSD_HOST_MODE_CHARGING) {	// tmtmtm
-						printk(KERN_INFO "Cable: host mode charging\n");
-						charger->cur_cable_type = usb_cable;
-						success = battery_callback(usb_cable);
-						host_mode_charging_state = 1;					// tmtmtm
+
+                        if(usbhost_fastcharge_in_host_mode) {
+						    printk(KERN_INFO "Cable: host mode charging ac\n");
+						    charger->cur_cable_type = ac_cable;
+						    success = battery_callback(ac_cable);
 #ifdef TOUCH_CALLBACK_ENABLED
-	                                    touch_callback(usb_cable);
+                            touch_callback(ac_cable);
 #endif
+                        } else {
+						    printk(KERN_INFO "Cable: host mode charging usb\n");
+						    charger->cur_cable_type = usb_cable;
+						    success = battery_callback(usb_cable);
+#ifdef TOUCH_CALLBACK_ENABLED
+                            touch_callback(usb_cable);
+#endif
+                        }
+					    host_mode_charging_state = 1;					// tmtmtm
+
 					} else {
 						charger->cur_cable_type = unknow_cable;
 						printk(KERN_INFO "Unkown Plug In Cable type !\n");
@@ -1125,7 +1147,7 @@ static int cable_type_detect(void)
 				printk(KERN_INFO "USBIN=0\n");
 
 				// tmtmtm: battery tab keeps stating "Charging (AC)"
-				if(fixed_install_mode) {
+				if(usbhost_fixed_install_mode) {
 					host_mode_charging_state = 0;
 					printk(KERN_INFO "cable_type_detect() disabled host_mode_charging_state ############\n");
 				}
@@ -1162,7 +1184,7 @@ static void inok_isr_work_function(struct work_struct *dat)
 		cancel_delayed_work(&charger->inok_isr_work);
 
 		// tmtmtm: no external power: in fixed_install_mode we prepare for power to come back
-		if(fixed_install_mode) {
+		if(usbhost_fixed_install_mode) {
 			smb347_clear_interrupts(client);
 
 			// stop host-mode, don't chargeSlaves, don't stopChargeSlaves
