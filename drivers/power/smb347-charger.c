@@ -347,25 +347,25 @@ static int smb347_configure_otg(struct i2c_client *client, int enableOTG, int ch
 				printk("smb347_configure_otg lastChargeSlaveDevicesState=%d\n",lastChargeSlaveDevicesState);
 			}
 		}
-		else
-		if(stopChargeSlaves) {
-			if(lastChargeSlaveDevicesState) {
-				//printk("smb347_configure_otg stop charging slaves\n");
-				/* Configure INOK to be active low */
-				ret = smb347_read(client, smb347_SYSOK_USB3);
-				if (ret < 0) {
-					dev_err(&client->dev, "%s: err %d\n", __func__, ret);
-					goto error;
-				}
+	}
 
-				ret = smb347_write(client, smb347_SYSOK_USB3, (ret & (~(1))));
-				if (ret < 0) {
-					dev_err(&client->dev, "%s: err %d\n", __func__, ret);
-					goto error;
-				}
-				lastChargeSlaveDevicesState = 0;
-				printk("smb347_configure_otg lastChargeSlaveDevicesState=%d\n",lastChargeSlaveDevicesState);
+	if(stopChargeSlaves) {
+		if(lastChargeSlaveDevicesState) {
+			//printk("smb347_configure_otg stop charging slaves\n");
+			/* Configure INOK to be active low */
+			ret = smb347_read(client, smb347_SYSOK_USB3);
+			if (ret < 0) {
+				dev_err(&client->dev, "%s: err %d\n", __func__, ret);
+				goto error;
 			}
+
+			ret = smb347_write(client, smb347_SYSOK_USB3, (ret & (~(1))));
+			if (ret < 0) {
+				dev_err(&client->dev, "%s: err %d\n", __func__, ret);
+				goto error;
+			}
+			lastChargeSlaveDevicesState = 0;
+			printk("smb347_configure_otg lastChargeSlaveDevicesState=%d\n",lastChargeSlaveDevicesState);
 		}
 	}
 
@@ -913,7 +913,7 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 						"otg..\n", __func__);
 				// disableOTG, dont chargeSlaves, don't stopChargeSlaves
 				printk("smb347_otg_status disableOTG, dont chargeSlaves, don't stopChargeSlaves\n");
-				ret = smb347_configure_otg(client, 0, 0, 0);
+				ret = smb347_configure_otg(client, 0, 0, lastChargeSlaveDevicesState);
 				if (ret < 0)
 					dev_err(&client->dev, "%s() error in configuring"
 						"otg..\n", __func__);
@@ -971,7 +971,7 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 					"otg..\n", __func__);
 			// enableOTG, don't chargeSlaves, don't stopChargeSlaves
 			printk("smb347_otg_status enableOTG, dont chargeSlaves, don't stopChargeSlaves\n");
-			ret = smb347_configure_otg(client, 1, 0, 0);
+			ret = smb347_configure_otg(client, 1, 0, lastChargeSlaveDevicesState);
 			if (ret < 0)
 				dev_err(&client->dev, "%s() error in configuring"
 					"otg..\n", __func__);
@@ -997,12 +997,14 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 
 	//if(!newExternalPowerState /*&& !lastChargeSlaveDevicesState*/) {
 		// make external power detectable in case it is coming back
+    // FIXME: probably better do this only, if lastChargeSlaveDevicesState is not set
+	if(!lastChargeSlaveDevicesState) {
 		printk("smb347_otg_status make external power detectable\n");
 		ret = smb347_configure_interrupts(client);
 		if (ret < 0)
 			dev_err(&client->dev, "%s() error in configuring"
 						"otg..\n", __func__);
-	//}
+	}
 
 	lastExternalPowerState = newExternalPowerState;
 	printk("smb347_otg_status DONE lastOtgState=%d externalPowerState=%d chargeSlaveDevicesState=%d\n",
@@ -1189,7 +1191,7 @@ static void inok_isr_work_function(struct work_struct *dat)
 
 			// stop host-mode, don't chargeSlaves, don't stopChargeSlaves
 			printk("inok_isr_work_function fixed_install stop host-mode, don't chargeSlaves, don't stopChargeSlaves\n");
-			if(smb347_configure_otg(client, 0, 0, 0)<0)
+			if(smb347_configure_otg(client, 0, 0, lastChargeSlaveDevicesState)<0)
 				dev_err(&client->dev, "%s() error in configuring"
 					"otg..\n", __func__);
 
@@ -1218,7 +1220,7 @@ static void inok_isr_work_function(struct work_struct *dat)
 			smb347_otg_status(OTG_STATE_A_HOST,OTG_STATE_A_HOST,NULL);
 		}
 
-        if(!lastExternalPowerState) {
+        if(!lastExternalPowerState && !lastChargeSlaveDevicesState) {
 	        // make external power detectable in case it is coming back
 	        printk("inok_isr_work_function make external power detectable1\n");
 	        int ret = smb347_configure_interrupts(client);
@@ -1263,7 +1265,7 @@ static void inok_isr_work_function(struct work_struct *dat)
 	// host_mode_charging_state may have been set by cable_type_detect()
 	if(host_mode_charging_state>0 && lastOtgState==0) {
 		printk("inok_isr_work_function external power available, start host mode\n");
-		if(smb347_configure_otg(client, 1, 0, 0)<0)
+		if(smb347_configure_otg(client, 1, 0, lastChargeSlaveDevicesState)<0)
 			dev_err(&client->dev, "%s() error in configuring"
 				"otg..\n", __func__);
 	}
