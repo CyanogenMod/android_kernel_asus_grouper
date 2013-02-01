@@ -5,6 +5,7 @@
  *
  * Copyright (C) 2010 NVIDIA Corp.
  * Copyright (C) 2010 Google, Inc.
+ * Copyright (C) 2013 Timur Mehrvarz
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -168,7 +169,6 @@ void tegra_start_host(struct tegra_otg_data *tegra)
 
 void tegra_stop_host(struct tegra_otg_data *tegra)
 {
-    //dev_info(tegra->otg.dev, "tegra_stop_host\n");
 	if (tegra->pdev) {
 		tegra_usb_otg_host_unregister(tegra->pdev);
 		tegra->pdev = NULL;
@@ -233,17 +233,11 @@ static void irq_work(struct work_struct *work)
 		dev_info(tegra->otg.dev, "%s --> %s\n", tegra_state_name(from),
 					      tegra_state_name(to));
 
-        if(smb347_deep_sleep>0) {
-            smb347_deep_sleep = 0;
-            dev_info(tegra->otg.dev, "smb347_deep_sleep cleared\n");
-        }
-
 		// tmtmtm
+        smb347_deep_sleep = 0;
 		if (to == OTG_STATE_A_SUSPEND) {
 			if (from == OTG_STATE_A_HOST) {
-                //dev_info(tegra->otg.dev, "tegra->charger_cb() h->s before\n");
 				if (tegra->charger_cb) {
-                    //dev_info(tegra->otg.dev, "tegra->charger_cb() h->s\n");
 					tegra->charger_cb(to, from, tegra->charger_cb_data); // smb347_otg_status()
 				}
 				tegra_stop_host(tegra);
@@ -257,10 +251,8 @@ static void irq_work(struct work_struct *work)
 			//if (from != OTG_STATE_A_HOST)
 			if (from == OTG_STATE_A_SUSPEND) {
 				if (tegra->charger_cb) {
-                    //dev_info(tegra->otg.dev, "tegra->charger_cb() ?->h\n");
 					tegra->charger_cb(to, from, tegra->charger_cb_data); // smb347_otg_status()
 				}
-                //dev_info(tegra->otg.dev, "tegra->charger_cb() ?->h after\n");
 			    tegra_start_host(tegra);
             }
 		}

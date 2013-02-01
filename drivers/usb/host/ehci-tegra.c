@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Google, Inc.
  * Copyright (C) 2009 - 2011 NVIDIA Corporation
+ * Copyright (C) 2013 Timur Mehrvarz
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -59,8 +60,6 @@
 
 extern void baseband_xmm_L3_resume_check(void);
 extern volatile int smb347_deep_sleep;  // tmtmtm: from smb347-charger.c
-//extern volatile int host_mode_charging_state; // tmtmtm: from smb347-charger.c
-//extern int fixed_install_mode; // tmtmtm: from smb347-charger.c
 static struct usb_hcd *modem_ehci_handle;
 
 struct tegra_ehci_hcd {
@@ -222,27 +221,15 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 		}
 		else if (tegra->bus_suspended &&
 				tegra->port_speed > TEGRA_USB_PHY_PORT_SPEED_HIGH) {
-		  // tmtmtm: OTG UNPLUG
-		  // original intent: when waking up from deep sleep, skip the default return, 
-		  //                  if host_mode_charging AND fixed_install_mode are set
-		  //if(host_mode_charging_state && fixed_install_mode) {
-    	  //  printk("ehci-tegra %s waking up with host_mode_charging: special\n", __func__);
 		  if(smb347_deep_sleep) {
     	    printk("ehci-tegra %s wake-up/OTG-UNPLUG with smb347_deep_sleep: special\n", __func__);
     	    // fix: skip default return
-    	    
-    	    // FIXME
-    	    // DAS EINSCHRÄNKEN AUF DEN fixed_install_mode löst das problem nur im MOBILE kernel
-    	    // ECHTE LÖSUNG: ONLY skip default return when really waking up from deep sleep
-    	    // das kann sowohl bei unplug als auch bei plug passieren
     	  } else {
-            printk("ehci-tegra %s wake-up/OTG-PLUG without smb347_deep_sleep: normal return\n", __func__);
 			spin_unlock(&ehci->lock);
 			return 0;
 		  }
 		}
 		spin_unlock(&ehci->lock);
-        //printk("ehci-tegra %s post spin_unlock\n", __func__);
 	}
 
 	irq_status = ehci_irq(hcd);
@@ -252,15 +239,12 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 	}
 
 	if (ehci->controller_remote_wakeup) {
-        //printk("ehci-tegra %s ehci->controller_remote_wakeup\n", __func__);
 		ehci->controller_remote_wakeup = false;
 		/* disable interrupts */
 		ehci_writel(ehci, 0, &ehci->regs->intr_enable);
 		tegra_usb_phy_preresume(tegra->phy, true);
 		tegra->port_resuming = 1;
-        //printk("ehci-tegra %s ehci->controller_remote_wakeup done\n", __func__);
 	}
-    //printk("ehci-tegra %s return irq_status=%d\n", __func__,irq_status);
 	return irq_status;
 }
 
@@ -630,21 +614,11 @@ static int tegra_usb_resume(struct usb_hcd *hcd, bool is_dpd)
 	tegra_ehci_power_up(hcd, is_dpd);
 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 
-    // tmtmtm: OTG PLUG
-    // original intent: skip the default restart, if host_mode_charging is set
-	//if(host_mode_charging_state) {
-  	//	printk("ehci-tegra ######### tegra_usb_resume host_mode_charging: special\n");
     if(smb347_deep_sleep) {
         printk("ehci-tegra %s wake-up/OTG-PLUG with smb347_deep_sleep: special\n", __func__);
-		// kommt u.a. 
-		// wenn der gepowerte OTG adapter gesteckt wird (mobile-use kernel)
-  		// fix: skip default restart
 	} else
 	if ((tegra->port_speed > TEGRA_USB_PHY_PORT_SPEED_HIGH) || (hsic) ||
-	    (null_ulpi))
-	{
-   		//printk("ehci-tegra #### tegra_usb_resume !host_mode_charging: restart\n");
-        printk("ehci-tegra %s wake-up/OTG-PLUG without smb347_deep_sleep: normal restart\n", __func__);
+	    (null_ulpi)) {
 		goto restart;
 	}
 

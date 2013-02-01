@@ -4,6 +4,7 @@
  * Battery charger driver for smb347 from summit microelectronics
  *
  * Copyright (c) 2012, NVIDIA Corporation.
+ * Copyright (C) 2013 Timur Mehrvarz
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -134,8 +135,6 @@ static unsigned int project_id;
 static unsigned int pcba_ver;
 static int gpio_dock_in = 0;
 
-// tmtmtm: also modify 'export KBUILD_BUILD_USER=timur-usbhost-fi-2013-01-01
-//static int fixed_install_mode = 0;
 extern int usbhost_fixed_install_mode;
 extern int usbhost_fastcharge_in_host_mode;
 
@@ -331,7 +330,7 @@ static int smb347_configure_otg(struct i2c_client *client, int enableOTG, int ch
 		}
 	}
 
-	// tmtmtm: we will never charge slave devices in fixed_install_mode
+	// tmtmtm: we never charge slave devices in fixed_install_mode
 	if(!usbhost_fixed_install_mode) {
 		if(chargeSlaves) {
 			if(!lastChargeSlaveDevicesState) {
@@ -351,7 +350,7 @@ static int smb347_configure_otg(struct i2c_client *client, int enableOTG, int ch
 
 	if(stopChargeSlaves) {
 		if(lastChargeSlaveDevicesState) {
-			//printk("smb347_configure_otg stop charging slaves\n");
+			printk("smb347_configure_otg stop charging slaves\n");
 			/* Configure INOK to be active low */
 			ret = smb347_read(client, smb347_SYSOK_USB3);
 			if (ret < 0) {
@@ -783,7 +782,7 @@ int smb347_hc_mode_callback(bool enable, int cur)
 		}
 	}
 
-	 /* Disable volatile writes to registers */
+	/* Disable volatile writes to registers */
 	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
 	if (ret < 0) {
 		dev_err(&client->dev, "%s() error in configuring charger..\n",
@@ -795,8 +794,6 @@ int smb347_hc_mode_callback(bool enable, int cur)
 	return ret;
 
 error:
-	//if(ret!=0)
-	//	printk(KERN_INFO "smb347_hc_mode_callback ERROR %d\n",ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(smb347_hc_mode_callback);
@@ -891,9 +888,9 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
         // and use host_mode_charging_state's current value (probably charging), 
         // before we call cable_type_detect() (when it will likely switch to not charging)
         // FIXME: but is tegra_usb_resume not only called on OTG PLUG?
-        // FIXME: do I mean "so that tegra_ehci_irq() can run first" ?
+        // FIXME: better "so that tegra_ehci_irq() can run first" ?
 	    schedule_timeout_interruptible(msecs_to_jiffies(100));
-        // when doing this pause, smb347_resume() will call cable_type_detect() before we do below
+        // pausing here, smb347_resume() will call cable_type_detect() before we do (see: below)
 	}
 	
 	cable_type_detect();
@@ -920,9 +917,6 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 			} else {
 				// tmtmtm: mobile-mode: we need to be careful NOT to disable charger detection too early
 				// once we start charging slaves ourselfs, we will not be able to detect ext power coming in
-
-				// also: why are we waiting here, if inok_isr_work_function is called on power
-				//       we actually depend on it to arrive in parallel
 
 		        // make external power detectable in case it is coming back
 		        printk("smb347_otg_status make external power detectable1\n");
@@ -995,9 +989,7 @@ static void smb347_otg_status(enum usb_otg_state to, enum usb_otg_state from, vo
 		}
 	}
 
-	//if(!newExternalPowerState /*&& !lastChargeSlaveDevicesState*/) {
-		// make external power detectable in case it is coming back
-    // FIXME: probably better do this only, if lastChargeSlaveDevicesState is not set
+	// make external power detectable in case it is coming back
 	if(!lastChargeSlaveDevicesState) {
 		printk("smb347_otg_status make external power detectable2\n");
 		ret = smb347_configure_interrupts(client);
@@ -1130,7 +1122,7 @@ static int cable_type_detect(void)
                             touch_callback(usb_cable);
 #endif
                         }
-					    host_mode_charging_state = 1;					// tmtmtm
+					    host_mode_charging_state = 1; // tmtmtm
 
 					} else {
 						charger->cur_cable_type = unknow_cable;
@@ -1148,7 +1140,7 @@ static int cable_type_detect(void)
 				charger->cur_cable_type = unknow_cable;
 				printk(KERN_INFO "USBIN=0\n");
 
-				// tmtmtm: battery tab keeps stating "Charging (AC)"
+				// tmtmtm: fix: battery tab keeps stating "Charging (AC)"
 				if(usbhost_fixed_install_mode) {
 					host_mode_charging_state = 0;
 					printk(KERN_INFO "cable_type_detect() disabled host_mode_charging_state ############\n");
@@ -1217,7 +1209,7 @@ static void inok_isr_work_function(struct work_struct *dat)
 			// so we can continue host mode in OTG mode
 			// if we would NOT call smb347_otg_status() here, slave devices would stay without power now
 
-// tmtmtm: we don't want to call this, if OTG-adapter is pulled (not just power)
+			// tmtmtm: we may not want to call this, if the OTG-adapter is pulled (not just power)
 			smb347_otg_status(OTG_STATE_A_HOST,OTG_STATE_A_HOST,NULL);
 		}
 
