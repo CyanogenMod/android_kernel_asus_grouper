@@ -61,10 +61,28 @@ static struct kobj_attribute hotplug_on_boot_attribute =
     __ATTR(usbhost_hotplug_on_boot, 0666, hotplug_on_boot_show, hotplug_on_boot_store);
 
 /* ----------------------------------------- */
+int usbhost_hostmode;
+
+static ssize_t hostmode_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", usbhost_hostmode);
+}
+
+static ssize_t hostmode_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+    sscanf(buf, "%du", &usbhost_hostmode);
+    return count;
+}
+
+static struct kobj_attribute hostmode_attribute = 
+    __ATTR(usbhost_hostmode, 0666, hostmode_show, hostmode_store);
+
+/* ----------------------------------------- */
 static struct attribute *attrs[] = {
     &fixed_install_mode_attribute.attr,
     &hotplug_on_boot_attribute.attr,
     &fastcharge_in_host_mode_attribute.attr,
+    &hostmode_attribute.attr,
     NULL,
 };
 
@@ -80,8 +98,10 @@ int usbhost_init(void)
 
 	// default values
 	usbhost_fixed_install_mode = 1;
-	usbhost_hotplug_on_boot = 0;
+	usbhost_hotplug_on_boot = 1;
 	usbhost_fastcharge_in_host_mode = 0;
+    printk("usbhost %s FI=%d HP=%d FC=%d\n", __func__, usbhost_fixed_install_mode,
+    	usbhost_hotplug_on_boot, usbhost_fastcharge_in_host_mode);
 
     usbhost_kobj = kobject_create_and_add("usbhost", kernel_kobj);
     if (!usbhost_kobj) {

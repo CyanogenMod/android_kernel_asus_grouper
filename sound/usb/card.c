@@ -78,10 +78,11 @@ MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{Generic,USB Audio}}");
 
 // tmtmtm
+extern int usbhost_hotplug_on_boot;
 struct timer_list my_timer;
 struct usb_device *postpone_usb_snd_dev = NULL;
 struct device_driver *postpone_usb_snd_drv = NULL;
-extern struct device_driver *current_drv;
+extern struct device_driver *current_drv; // from base/dd.c
 
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
@@ -433,11 +434,11 @@ static int snd_usb_audio_create(struct usb_device *dev, int idx,
 }
 
 //tmtmtm
-static int mykthread(void *unused)
+static void mykthread(void *unused)
 {
 	printk("##### sound/usb/card.c mykthread driver_attach\n");
 	if(postpone_usb_snd_drv!=NULL)
-    	driver_attach(postpone_usb_snd_drv);
+    	driver_attach(postpone_usb_snd_drv); // drives/base/dd.c
 }
 static void delayed_func(unsigned long unused)
 {
@@ -480,23 +481,32 @@ snd_usb_audio_probe(struct usb_device *dev,
 	if (quirk && quirk->ifnum >= 0 && ifnum != quirk->ifnum)
 		goto __err_val;
 
-    // tmtmtm: we don't want the USB DAC to become the primary sound card
-    // in order for a USB DAC, connected at boot time, to become available as 
-    // an *overlay* primary sound card, we must postpone device probe
-
-    struct timespec tp; ktime_get_ts(&tp);
-   	if (tp.tv_sec<8 && postpone_usb_snd_dev==NULL) {
-    	printk("##### sound/usb/card.c DON'T REGISTER EARLY tv_sec=%d ++++++++++++++++++++\n",tp.tv_sec);
-        postpone_usb_snd_dev = dev;
-        postpone_usb_snd_drv = current_drv;       
-        init_timer(&my_timer);
-        my_timer.expires = jiffies + 20*HZ; // n*HZ = delay in number of seconds
-        my_timer.function = delayed_func;
-        add_timer(&my_timer);
-    	printk("##### sound/usb/card.c delayed call to driver_attach initiated\n");
-		goto __err_val;
+	// tmtmtm
+	// we may not want the USB DAC, connected at boot time, to become 
+	// the primary sound card, rather for it to become available as 
+	// an *overlay* primary sound card, so we postpone device probe
+	if(usbhost_hotplug_on_boot) {
+		struct timespec tp; ktime_get_ts(&tp);
+	   	if (tp.tv_sec<8 && postpone_usb_snd_dev==NULL) {
+			printk("##### sound/usb/card.c DON'T REGISTER EARLY tv_sec=%d ++++++++++++++++++++\n",tp.tv_sec);
+			
+			// it would be good if the delayed call to driver_attach() (which will result in UEVENT ALSA_ID)
+			// would not be done by time (20 sec), but by ???
+			// the current strategy may prove to be not 100% reliable
+			
+		    postpone_usb_snd_dev = dev;
+		    postpone_usb_snd_drv = current_drv;       
+		    init_timer(&my_timer);
+		    my_timer.expires = jiffies + 18*HZ; // n*HZ = delay in number of seconds
+		    my_timer.function = delayed_func;
+		    add_timer(&my_timer);
+			printk("##### sound/usb/card.c delayed call to driver_attach initiated\n");
+			goto __err_val;
+		}
+	   	printk("##### sound/usb/card.c REGISTER tv_sec=%d ++++++++++++++++++++++++\n",tp.tv_sec);
+	} else {
+	   	printk("##### sound/usb/card.c REGISTER !hotplug_on_boot\n");
 	}
-   	//printk("##### sound/usb/card.c REGISTER tv_sec=%d ++++++++++++++++++++++++\n",tp.tv_sec);
 
 
 	if (snd_usb_apply_boot_quirk(dev, intf, quirk) < 0)
@@ -574,6 +584,7 @@ snd_usb_audio_probe(struct usb_device *dev,
 	chip->num_interfaces++;
 	chip->probing = 0;
 	mutex_unlock(&register_mutex);
+	printk("##### sound/usb/card.c snd_usb_audio_probe done OK\n");
 	return chip;
 
  __error:
