@@ -361,7 +361,7 @@ ARM_FLAGS	= -march=armv7-a \
 
 CFLAGS_MODULE   = $(ARM_FLAGS) -DMODULE
 AFLAGS_MODULE   = $(ARM_FLAGS) -DMODULE
-LDFLAGS_MODULE  =
+LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
 CFLAGS_KERNEL	= $(ARM_FLAGS)
 AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
