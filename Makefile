@@ -347,12 +347,33 @@ CHECK		= sparse
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
+
 CFLAGS_MODULE   =
 AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
+
+ifdef CONFIG_OPTIMIZE_FOR_GROUPER
+ARM_FLAGS	= -march=armv7-a \
+		  -mfpu=neon \
+		  -mtune=cortex-a9 \
+		  -Os \
+		  -fgcse-after-reload \
+		  -fipa-cp-clone \
+		  -fpredictive-commoning \
+		  -fsched-spec-load \
+		  -funswitch-loops \
+		  -fvect-cost-model
+endif
+
+ifdef CONFIG_OPTIMIZE_FOR_GROUPER
+CFLAGS_MODULE   = $(ARM_FLAGS) -DMODULE
+AFLAGS_MODULE   = $(ARM_FLAGS) -DMODULE
+CFLAGS_KERNEL	= $(ARM_FLAGS)
+endif
+
 
 
 # Use LINUXINCLUDE when you must reference the include/ directory.

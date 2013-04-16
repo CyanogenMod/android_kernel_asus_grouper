@@ -614,6 +614,17 @@ config ARCH_TEGRA
 	  This enables support for NVIDIA Tegra based systems (Tegra APX,
 	  Tegra 6xx and Tegra 2 series).
 
+config OPTIMIZE_FOR_GROUPER
+	bool "Optimize for Grouper Board (EXPERIMENTAL)"
+	default n
+	depends on ARCH_TEGRA && EXPERIMENTAL
+	help
+	  Enabling this option will pass extra flags during the compilation process
+	  to optimize for grouper board such as -march=armv7-a, -mtune=cortex-a9, and
+	  other grouper specific ARM flags.
+
+	  If unsure, say N.
+
 config ARCH_PNX4008
 	bool "Philips Nexperia PNX4008 Mobile"
 	select CPU_ARM926T
