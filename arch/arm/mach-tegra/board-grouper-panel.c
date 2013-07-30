@@ -218,6 +218,7 @@ static int grouper_panel_enable(void)
 		else
 			regulator_enable(grouper_lvds_vdd_panel);
 	}
+	msleep(20);
 
 	if( grouper_get_project_id() == GROUPER_PROJECT_BACH )
 	{
