@@ -910,13 +910,8 @@ static unsigned int dma_handle_tx(struct eg20t_port *priv)
 			sg_dma_len(sg) = size;
 	}
 
-<<<<<<< HEAD
-	desc = priv->chan_tx->device->device_prep_slave_sg(priv->chan_tx,
-					priv->sg_tx_p, nent, DMA_TO_DEVICE,
-=======
 	desc = dmaengine_prep_slave_sg(priv->chan_tx,
 					priv->sg_tx_p, nent, DMA_MEM_TO_DEV,
->>>>>>> 1605282... dmaengine/dma_slave: introduce inline wrappers
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!desc) {
 		dev_err(priv->port.dev, "%s:device_prep_slave_sg Failed\n",
