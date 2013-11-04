@@ -108,6 +108,8 @@
 #define DELAY_FOR_CURR_LIMIT_RECONF (60)
 #define ADAPTER_PROTECT_DELAY (4*HZ)
 #define GPIO_AC_OK		TEGRA_GPIO_PV1
+#define ENABLE_PIN_CTRL_MASK 0x60
+#define BAT_Hot_Limit 45
 
 /* Functions declaration */
 static int smb347_configure_charger(struct i2c_client *client, int value);
@@ -1060,42 +1062,37 @@ static void dockin_isr_work_function(struct work_struct *dat)
 static ssize_t smb347_reg_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client = charger->client;
-	uint8_t config_reg[14], cmd_reg[1], status_reg[10];
-	int i, ret = 0;
+	uint8_t config_reg[15], cmd_reg[1], status_reg[10];
+	char tmp_buf[64];
+	int i, cfg_ret, cmd_ret, sts_ret = 0;
 
-	ret += i2c_smbus_read_i2c_block_data(client, smb347_CHARGE, 15, config_reg)
-	     + i2c_smbus_read_i2c_block_data(client, smb347_CMD_REG, 2, cmd_reg)
-	     + i2c_smbus_read_i2c_block_data(client, smb347_INTR_STS_A, 11, status_reg);
+	cfg_ret = i2c_smbus_read_i2c_block_data(client, smb347_CHARGE, 15, config_reg);
+	cmd_ret = i2c_smbus_read_i2c_block_data(client, smb347_CMD_REG, 2, cmd_reg);
+	sts_ret = i2c_smbus_read_i2c_block_data(client, smb347_INTR_STS_A, 11, status_reg);
 
-	if (ret < 0)
-		SMB_ERR("failed to read charger reg !\n");
+	sprintf(tmp_buf, "SMB34x Configuration Registers Detail\n"
+					"==================\n");
+	strcpy(buf, tmp_buf);
 
-	SMB_INFO("smb347 Registers\n");
-	SMB_INFO("------------------\n");
-	for(i=0;i<=14;i++)
-		SMB_INFO("Reg[%02xh]=0x%02x\n", i, config_reg[i]);
-	for(i=0;i<=1;i++)
-		SMB_INFO("Reg[%02xh]=0x%02x\n", 48+i, cmd_reg[i]);
-	for(i=0;i<=10;i++)
-		SMB_INFO("Reg[%02xh]=0x%02x\n", 53+i, status_reg[i]);
-
-	return sprintf(buf, "Reg[06h]=0x%02x\n"
-		"Reg[08h]=0x%02x\n"
-		"Reg[30h]=0x%02x\n"
-		"Reg[31h]=0x%02x\n"
-		"Reg[39h]=0x%02x\n"
-		"Reg[3dh]=0x%02x\n"
-		"Reg[3eh]=0x%02x\n"
-		"Reg[3fh]=0x%02x\n",
-		config_reg[6],
-		config_reg[8],
-		cmd_reg[0],
-		cmd_reg[1],
-		status_reg[4],
-		status_reg[8],
-		status_reg[9],
-		status_reg[10]);
-
+	if (cfg_ret > 0) {
+		for(i=0;i<=14;i++) {
+			sprintf(tmp_buf, "Reg%02xh:\t0x%02x\n", i, config_reg[i]);
+			strcat(buf, tmp_buf);
+		}
+	}
+	if (cmd_ret > 0) {
+		for(i=0;i<=1;i++) {
+			sprintf(tmp_buf, "Reg%02xh:\t0x%02x\n", 48+i, cmd_reg[i]);
+			strcat(buf, tmp_buf);
+		}
+	}
+	if (sts_ret > 0) {
+		for(i=0;i<=10;i++) {
+			sprintf(tmp_buf, "Reg%02xh:\t0x%02x\n", 53+i, status_reg[i]);
+			strcat(buf, tmp_buf);
+		}
+	}
+	return strlen(buf);
 }
 
 static void smb347_default_setback(void)
@@ -1160,6 +1157,53 @@ static int smb347_temp_limit_setting(void)
 error:
 	return -1;
 }
+
+int smb347_config_thermal_charging(int temp)
+{
+	struct i2c_client *client = charger->client;
+	int ret = 0, retval, setting = 0;
+
+	mdelay(150);
+	SMB_NOTICE("temp=%d\n", temp);
+
+	ret = smb347_volatile_writes(client, smb347_ENABLE_WRITE);
+		if (ret < 0) {
+			dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
+			goto error;
+	}
+
+	/*charger enable/disable*/
+	retval = smb347_read(client, smb347_PIN_CTRL);
+	if (retval < 0) {
+		dev_err(&client->dev, "%s(): Failed in reading 0x%02x",
+				__func__, smb347_PIN_CTRL);
+		goto error;
+	}
+
+	setting = retval & ENABLE_PIN_CTRL_MASK;
+	if (temp > BAT_Hot_Limit) {
+		if (setting != 0x40) {
+			SMB_NOTICE("Charger disable\n");
+			smb347_charger_enable(false);
+		} else
+			SMB_NOTICE("Bypass charger disable\n");
+	} else {
+		if (setting != 0x60) {
+			SMB_NOTICE("Charger enable\n");
+			smb347_charger_enable(true);
+		} else
+			SMB_NOTICE("Bypass charger enable\n");
+	}
+
+	ret = smb347_volatile_writes(client, smb347_DISABLE_WRITE);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s() charger enable write error..\n", __func__);
+		goto error;
+	}
+error:
+	return ret;
+}
+EXPORT_SYMBOL(smb347_config_thermal_charging);
 
 static int __devinit smb347_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
