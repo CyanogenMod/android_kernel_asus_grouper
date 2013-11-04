@@ -89,6 +89,7 @@ static int bq27541_get_property(struct power_supply *psy,
 	enum power_supply_property psp, union power_supply_propval *val);
 extern unsigned  get_usb_cable_status(void);
 extern int smb347_charger_enable(bool enable);
+extern int smb347_config_thermal_charging(int temp);
 
 module_param(battery_current, uint, 0644);
 module_param(battery_remaining_capacity, uint, 0644);
@@ -148,6 +149,7 @@ static enum power_supply_property bq27541_properties[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
 };
 
 void check_cabe_type(void)
@@ -344,6 +346,26 @@ static const struct attribute_group battery_smbus_group = {
 	.attrs = battery_smbus_attributes,
 };
 
+static int bq27541_battery_current(void)
+{
+	int ret;
+	int curr = 0;
+
+	ret = bq27541_read_i2c(bq27541_data[REG_CURRENT].addr, &curr, 0);
+	if (ret) {
+		BAT_ERR("error reading current ret = %x\n", ret);
+		return 0;
+	}
+
+	curr = (s16)curr;
+
+	if (curr >= bq27541_data[REG_CURRENT].min_value &&
+		curr <= bq27541_data[REG_CURRENT].max_value) {
+		return curr;
+	} else
+		return 0;
+}
+
 static void battery_status_poll(struct work_struct *work)
 {
        struct bq27541_device_info *batt_dev = container_of(work, struct bq27541_device_info, status_poll_work.work);
@@ -352,6 +374,10 @@ static void battery_status_poll(struct work_struct *work)
 		BAT_NOTICE("battery driver not ready\n");
 
 	power_supply_changed(&bq27541_supply[Charger_Type_Battery]);
+
+	if (!bq27541_device->temp_err)
+		if (ac_on || usb_on)
+			smb347_config_thermal_charging(bq27541_device->old_temperature/10);
 
 	/* Schedule next polling */
 	queue_delayed_work(battery_work_queue, &batt_dev->status_poll_work, bat_check_interval*HZ);
@@ -598,6 +624,11 @@ static int bq27541_get_psp(int reg_offset, enum power_supply_property psp,
 		}
 		bq27541_device->old_temperature = val->intval = ret;
 		BAT_NOTICE("temperature= %u (0.1¢XC)\n", val->intval);
+	}
+	if (psp == POWER_SUPPLY_PROP_CURRENT_NOW) {
+		val->intval = bq27541_device->bat_current
+			= bq27541_battery_current();
+		BAT_NOTICE("current = %d mA\n", val->intval);
 	}
 	return 0;
 }
