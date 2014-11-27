@@ -76,6 +76,7 @@ struct cpufreq_interactive_core_lock {
 	struct timer_list unlock_timer;
 	int request_active;
 	unsigned long lock_period;
+	unsigned int core_lock_count;
 	struct mutex mutex;
 };
 
@@ -695,7 +696,29 @@ static void cpufreq_interactive_lock_cores(void)
 		goto arm_timer;
 	}
 
+
 	ncpus = num_online_cpus();
+
+	if (core_lock.core_lock_count) {
+		if (ncpus < core_lock.core_lock_count) {
+			pr_debug("%s: num_online_cpus %d < core_lock_count %d, overriding\n",
+				 __func__,
+				 ncpus,
+				 core_lock.core_lock_count);
+			ncpus = core_lock.core_lock_count;
+		}
+		pr_debug("%s: forcing %d cores online for %lu ns\n",
+			 __func__,
+			 ncpus,
+			 core_lock.lock_period);
+	}
+	else {
+		pr_debug("%s: forcing %d already-online cores online for %lu ns\n",
+			 __func__,
+			 ncpus,
+			 core_lock.lock_period);
+	}
+
 	pm_qos_update_request(&core_lock.qos_min_req, ncpus);
 	pm_qos_update_request(&core_lock.qos_max_req, ncpus);
 	core_lock.request_active++;
@@ -1024,6 +1047,48 @@ static ssize_t store_timer_rate(struct kobject *kobj,
 static struct global_attr timer_rate_attr = __ATTR(timer_rate, 0644,
 		show_timer_rate, store_timer_rate);
 
+static ssize_t show_core_lock_period(struct kobject *kobj, struct attribute *attr,
+				     char *buf)
+{
+	return sprintf(buf, "%lu\n", core_lock.lock_period);
+}
+
+static ssize_t store_core_lock_period(struct kobject *kobj, struct attribute *attr,
+				      const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = strict_strtoul(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+	core_lock.lock_period = val;
+	return count;
+}
+
+define_one_global_rw(core_lock_period);
+
+static ssize_t show_core_lock_count(struct kobject *kobj, struct attribute *attr,
+				    char *buf)
+{
+	return sprintf(buf, "%u\n", core_lock.core_lock_count);
+}
+
+static ssize_t store_core_lock_count(struct kobject *kobj, struct attribute *attr,
+				     const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = strict_strtoul(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+	core_lock.core_lock_count = min((unsigned int)val, num_possible_cpus());
+	return count;
+}
+
+define_one_global_rw(core_lock_count);
+
 static ssize_t show_input_boost(struct kobject *kobj, struct attribute *attr,
 				char *buf)
 {
@@ -1087,6 +1152,8 @@ static struct attribute *interactive_attributes[] = {
 	&timer_rate_attr.attr,
 	&input_boost.attr,
 	&boost.attr,
+	&core_lock_period.attr,
+	&core_lock_count.attr,
 	NULL,
 };
 
@@ -1267,6 +1334,7 @@ static int __init cpufreq_interactive_init(void)
 
 	core_lock.request_active = 0;
 	core_lock.lock_period = DEFAULT_CORE_LOCK_PERIOD;
+	core_lock.core_lock_count = 0; /* defaults to num_online_cpus() */
 	mutex_init(&core_lock.mutex);
 
 	core_lock.lock_task = kthread_create(cpufreq_interactive_lock_cores_task, NULL,
