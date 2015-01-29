@@ -17,10 +17,10 @@
 /*
  * See Documentation/block/deadline-iosched.txt
  */
-static const int read_expire = HZ / 2;  /* max time before a read is submitted. */
-static const int write_expire = 5 * HZ; /* ditto for writes, these limits are SOFT! */
-static const int writes_starved = 2;    /* max times reads can starve a write */
-static const int fifo_batch = 16;       /* # of sequential requests treated as one
+static const int read_expire = HZ / 4;  /* max time before a read is submitted. */
+static const int write_expire = HZ; /* ditto for writes, these limits are SOFT! */
+static const int writes_starved = 8;    /* max times reads can starve a write */
+static const int fifo_batch = 1;       /* # of sequential requests treated as one
 				     by the above parameters. For throughput. */
 
 struct deadline_data {
@@ -106,7 +106,11 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 	/*
 	 * set expire time and add to fifo list
 	 */
-	rq_set_fifo_time(rq, jiffies + dd->fifo_expire[data_dir]);
+	if (data_dir == READ)
+		rq_set_fifo_time(rq, jiffies);
+	else
+		rq_set_fifo_time(rq, jiffies + dd->fifo_expire[data_dir]);
+		
 	list_add_tail(&rq->queuelist, &dd->fifo_list[data_dir]);
 }
 
@@ -230,7 +234,7 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
 	/*
 	 * rq is expired!
 	 */
-	if (time_after(jiffies, rq_fifo_time(rq)))
+	if (time_after_eq(jiffies, rq_fifo_time(rq)))
 		return 1;
 
 	return 0;
@@ -352,7 +356,7 @@ static void *deadline_init_queue(struct request_queue *q)
 	dd->fifo_expire[READ] = read_expire;
 	dd->fifo_expire[WRITE] = write_expire;
 	dd->writes_starved = writes_starved;
-	dd->front_merges = 1;
+	dd->front_merges = 0;
 	dd->fifo_batch = fifo_batch;
 	return dd;
 }
