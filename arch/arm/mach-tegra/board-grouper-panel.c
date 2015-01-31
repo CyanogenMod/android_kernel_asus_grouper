@@ -549,7 +549,7 @@ static struct tegra_dc_out grouper_disp1_out = {
 
 	.type		= TEGRA_DC_OUT_RGB,
 	.depth		= 18,
-	.dither		= TEGRA_DC_ERRDIFF_DITHER,
+	.dither		= TEGRA_DC_ORDERED_DITHER,
 
 	.modes		= grouper_panel_modes,
 	.n_modes	= ARRAY_SIZE(grouper_panel_modes),
