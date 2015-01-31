@@ -20,7 +20,6 @@
 #include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/pagevec.h>
-#include <linux/dcache.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -118,7 +117,7 @@ static int get_parent_ino(struct inode *inode, nid_t *pino)
 	return 1;
 }
 
-int f2fs_sync_file(struct file *file, int datasync)
+int f2fs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	struct inode *inode = file->f_mapping->host;
 	struct f2fs_inode_info *fi = F2FS_I(inode);
@@ -135,6 +134,11 @@ int f2fs_sync_file(struct file *file, int datasync)
 		return 0;
 
 	trace_f2fs_sync_file_enter(inode);
+	ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	if (ret) {
+		trace_f2fs_sync_file_exit(inode, need_cp, datasync, ret);
+		return ret;
+	}
 
 	/* guarantee free sections for fsync */
 	f2fs_balance_fs(sbi);
@@ -556,7 +560,7 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 const struct inode_operations f2fs_file_inode_operations = {
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
-	.check_acl	= f2fs_check_acl,
+	.get_acl	= f2fs_get_acl,
 #ifdef CONFIG_F2FS_FS_XATTR
 	.setxattr	= generic_setxattr,
 	.getxattr	= generic_getxattr,
@@ -771,7 +775,7 @@ long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	{
 		unsigned int oldflags;
 
-		ret = mnt_want_write(filp->f_path.mnt);
+		ret = mnt_want_write(filp->f_path.mnt);           
 		if (ret)
 			return ret;
 

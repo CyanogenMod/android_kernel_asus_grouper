@@ -1100,7 +1100,7 @@ static inline void f2fs_stop_checkpoint(struct f2fs_sb_info *sbi)
 /*
  * file.c
  */
-int f2fs_sync_file(struct file *, int);
+int f2fs_sync_file(struct file *, loff_t, loff_t, int);
 void truncate_data_blocks(struct dnode_of_data *);
 int truncate_blocks(struct inode *, u64);
 void f2fs_truncate(struct inode *);
