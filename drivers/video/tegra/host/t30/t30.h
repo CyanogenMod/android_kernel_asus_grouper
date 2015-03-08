@@ -21,9 +21,9 @@
 #define _NVHOST_T30_H_
 
 struct nvhost_master;
+struct nvhost_chip_support;
 
-int nvhost_init_t30_channel_support(struct nvhost_master *);
-int nvhost_init_t30_debug_support(struct nvhost_master *);
-int nvhost_init_t30_support(struct nvhost_master *host);
+int nvhost_init_t30_support(struct nvhost_master *host,
+	struct nvhost_chip_support *);
 
 #endif /* _NVHOST_T30_H_ */

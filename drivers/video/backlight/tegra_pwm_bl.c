@@ -20,6 +20,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/tegra_pwm_bl.h>
+#include <linux/gpio.h>
 #include <mach/dc.h>
 
 struct tegra_pwm_bl_data {
@@ -112,10 +113,16 @@ static int tegra_pwm_backlight_probe(struct platform_device *pdev)
 	tbl->check_fb = data->check_fb;
 	tbl->params.which_pwm = data->which_pwm;
 	tbl->params.gpio_conf_to_sfio = data->gpio_conf_to_sfio;
-	tbl->params.switch_to_sfio = data->switch_to_sfio;
 	tbl->params.period = data->period;
 	tbl->params.clk_div = data->clk_div;
 	tbl->params.clk_select = data->clk_select;
+
+	/* If backlight pin is sfio, request for it */
+	if (gpio_is_valid(tbl->params.gpio_conf_to_sfio)) {
+		ret = gpio_request(tbl->params.gpio_conf_to_sfio, "disp_bl");
+		if (ret)
+			dev_err(&pdev->dev, "backlight gpio request failed\n");
+	}
 
 	memset(&props, 0, sizeof(struct backlight_properties));
 	props.type = BACKLIGHT_RAW;
@@ -129,6 +136,9 @@ static int tegra_pwm_backlight_probe(struct platform_device *pdev)
 	}
 
 	bl->props.brightness = data->dft_brightness;
+
+	if (gpio_is_valid(tbl->params.gpio_conf_to_sfio))
+		gpio_free(tbl->params.gpio_conf_to_sfio);
 	backlight_update_status(bl);
 
 	platform_set_drvdata(pdev, bl);

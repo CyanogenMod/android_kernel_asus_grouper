@@ -21,7 +21,8 @@
 #include "dev.h"
 #include "bus_client.h"
 
-static int __devinit gr2d_probe(struct nvhost_device *dev)
+static int __devinit gr2d_probe(struct nvhost_device *dev,
+	struct nvhost_device_id *id_table)
 {
 	return nvhost_client_device_init(dev);
 }
@@ -32,6 +33,7 @@ static int __exit gr2d_remove(struct nvhost_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
 static int gr2d_suspend(struct nvhost_device *dev, pm_message_t state)
 {
 	return nvhost_client_device_suspend(dev);
@@ -42,8 +44,7 @@ static int gr2d_resume(struct nvhost_device *dev)
 	dev_info(&dev->dev, "resuming\n");
 	return 0;
 }
-
-struct nvhost_device *gr2d_device;
+#endif
 
 static struct nvhost_driver gr2d_driver = {
 	.probe = gr2d_probe,
@@ -60,16 +61,6 @@ static struct nvhost_driver gr2d_driver = {
 
 static int __init gr2d_init(void)
 {
-	int err;
-
-	gr2d_device = nvhost_get_device("gr2d");
-	if (!gr2d_device)
-		return -ENXIO;
-
-	err = nvhost_device_register(gr2d_device);
-	if (err)
-		return err;
-
 	return nvhost_driver_register(&gr2d_driver);
 }
 

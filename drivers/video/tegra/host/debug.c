@@ -22,8 +22,12 @@
 
 #include <linux/io.h>
 
+#include "bus.h"
 #include "dev.h"
 #include "debug.h"
+#include "nvhost_acm.h"
+#include "nvhost_channel.h"
+#include "chip_support.h"
 
 pid_t nvhost_debug_null_kickoff_pid;
 unsigned int nvhost_debug_trace_cmdbuf;
@@ -59,8 +63,8 @@ static int show_channels(struct device *dev, void *data)
 		mutex_lock(&ch->reflock);
 		if (ch->refcount) {
 			mutex_lock(&ch->cdma.lock);
-			m->op.debug.show_channel_fifo(m, ch, o, nvdev->index);
-			m->op.debug.show_channel_cdma(m, ch, o, nvdev->index);
+			nvhost_get_chip_ops()->debug.show_channel_fifo(m, ch, o, nvdev->index);
+			nvhost_get_chip_ops()->debug.show_channel_cdma(m, ch, o, nvdev->index);
 			mutex_unlock(&ch->cdma.lock);
 		}
 		mutex_unlock(&ch->reflock);
@@ -72,19 +76,19 @@ static int show_channels(struct device *dev, void *data)
 static void show_syncpts(struct nvhost_master *m, struct output *o)
 {
 	int i;
-	BUG_ON(!m->op.syncpt.name);
+	BUG_ON(!nvhost_get_chip_ops()->syncpt.name);
 	nvhost_debug_output(o, "---- syncpts ----\n");
-	for (i = 0; i < m->syncpt.nb_pts; i++) {
+	for (i = 0; i < nvhost_syncpt_nb_pts(&m->syncpt); i++) {
 		u32 max = nvhost_syncpt_read_max(&m->syncpt, i);
 		u32 min = nvhost_syncpt_update_min(&m->syncpt, i);
 		if (!min && !max)
 			continue;
 		nvhost_debug_output(o, "id %d (%s) min %d max %d\n",
-				i, m->op.syncpt.name(&m->syncpt, i),
+				i, nvhost_get_chip_ops()->syncpt.name(&m->syncpt, i),
 				min, max);
 	}
 
-	for (i = 0; i < m->syncpt.nb_bases; i++) {
+	for (i = 0; i < nvhost_syncpt_nb_pts(&m->syncpt); i++) {
 		u32 base_val;
 		base_val = nvhost_syncpt_read_wait_base(&m->syncpt, i);
 		if (base_val)
@@ -99,16 +103,56 @@ static void show_all(struct nvhost_master *m, struct output *o)
 {
 	nvhost_module_busy(m->dev);
 
-	m->op.debug.show_mlocks(m, o);
+	nvhost_get_chip_ops()->debug.show_mlocks(m, o);
 	show_syncpts(m, o);
 	nvhost_debug_output(o, "---- channels ----\n");
-	bus_for_each_dev(&nvhost_bus_type, NULL, o, show_channels);
+	bus_for_each_dev(&(nvhost_bus_get())->nvhost_bus_type, NULL, o,
+			show_channels);
 
 	nvhost_module_idle(m->dev);
 }
 
 #ifdef CONFIG_DEBUG_FS
-static int nvhost_debug_show(struct seq_file *s, void *unused)
+static int show_channels_no_fifo(struct device *dev, void *data)
+{
+	struct nvhost_channel *ch;
+	struct nvhost_device *nvdev = to_nvhost_device(dev);
+	struct output *o = data;
+	struct nvhost_master *m;
+
+	if (nvdev == NULL)
+		return 0;
+
+	m = nvhost_get_host(nvdev);
+	ch = nvdev->channel;
+	if (ch) {
+		mutex_lock(&ch->reflock);
+		if (ch->refcount) {
+			mutex_lock(&ch->cdma.lock);
+			nvhost_get_chip_ops()->debug.show_channel_cdma(m,
+					ch, o, nvdev->index);
+			mutex_unlock(&ch->cdma.lock);
+		}
+		mutex_unlock(&ch->reflock);
+	}
+
+	return 0;
+}
+
+static void show_all_no_fifo(struct nvhost_master *m, struct output *o)
+{
+	nvhost_module_busy(m->dev);
+
+	nvhost_get_chip_ops()->debug.show_mlocks(m, o);
+	show_syncpts(m, o);
+	nvhost_debug_output(o, "---- channels ----\n");
+	bus_for_each_dev(&(nvhost_bus_get())->nvhost_bus_type, NULL, o,
+			show_channels_no_fifo);
+
+	nvhost_module_idle(m->dev);
+}
+
+static int nvhost_debug_show_all(struct seq_file *s, void *unused)
 {
 	struct output o = {
 		.fn = write_to_seqfile,
@@ -117,6 +161,27 @@ static int nvhost_debug_show(struct seq_file *s, void *unused)
 	show_all(s->private, &o);
 	return 0;
 }
+static int nvhost_debug_show(struct seq_file *s, void *unused)
+{
+	struct output o = {
+		.fn = write_to_seqfile,
+		.ctx = s
+	};
+	show_all_no_fifo(s->private, &o);
+	return 0;
+}
+
+static int nvhost_debug_open_all(struct inode *inode, struct file *file)
+{
+	return single_open(file, nvhost_debug_show_all, inode->i_private);
+}
+
+static const struct file_operations nvhost_debug_all_fops = {
+	.open		= nvhost_debug_open_all,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 static int nvhost_debug_open(struct inode *inode, struct file *file)
 {
@@ -136,14 +201,16 @@ void nvhost_debug_init(struct nvhost_master *master)
 
 	debugfs_create_file("status", S_IRUGO, de,
 			master, &nvhost_debug_fops);
+	debugfs_create_file("status_all", S_IRUGO, de,
+			master, &nvhost_debug_all_fops);
 
 	debugfs_create_u32("null_kickoff_pid", S_IRUGO|S_IWUSR, de,
 			&nvhost_debug_null_kickoff_pid);
 	debugfs_create_u32("trace_cmdbuf", S_IRUGO|S_IWUSR, de,
 			&nvhost_debug_trace_cmdbuf);
 
-	if (master->op.debug.debug_init)
-		master->op.debug.debug_init(de);
+	if (nvhost_get_chip_ops()->debug.debug_init)
+		nvhost_get_chip_ops()->debug.debug_init(de);
 
 	debugfs_create_u32("force_timeout_pid", S_IRUGO|S_IWUSR, de,
 			&nvhost_debug_force_timeout_pid);

@@ -7,6 +7,21 @@ config TEGRA_GRHOST
 	help
 	  Driver for the Tegra graphics host hardware.
 
+config TEGRA_GRHOST_USE_NVMAP
+	bool "Use nvmap as graphics memory manager"
+	default y
+	help
+	  Use nvmap as the graphics memory manager. This is the only
+	  choice at the moment.
+
+config TEGRA_GRHOST_DEFAULT_TIMEOUT
+	depends on TEGRA_GRHOST
+	int "Default timeout for submits"
+	default 0 if TEGRA_SIMULATION_PLATFORM
+	default 30000
+	help
+	  Default timeout for jobs in milliseconds. Set to zero for no timeout.
+
 config TEGRA_DC
 	tristate "Tegra Display Contoller"
 	depends on ARCH_TEGRA && TEGRA_GRHOST
@@ -35,6 +50,7 @@ config TEGRA_DC_EXTENSIONS
 
 config TEGRA_NVMAP
 	bool "Tegra GPU memory management driver (nvmap)"
+	select ARM_DMA_USE_IOMMU if IOMMU_API
 	default y
 	help
 	  Say Y here to include the memory management driver for the Tegra
@@ -42,7 +58,7 @@ config TEGRA_NVMAP
 
 config NVMAP_RECLAIM_UNPINNED_VM
 	bool "Virtualize IOVMM memory in nvmap"
-	depends on TEGRA_NVMAP && TEGRA_IOVMM
+	depends on TEGRA_NVMAP && (TEGRA_IOVMM || IOMMU_API)
 	default y
 	help
 	  Say Y here to enable nvmap to reclaim I/O virtual memory after
@@ -53,7 +69,7 @@ config NVMAP_RECLAIM_UNPINNED_VM
 config NVMAP_ALLOW_SYSMEM
 	bool "Allow physical system memory to be used by nvmap"
 	depends on TEGRA_NVMAP
-	default y
+	default n
 	help
 	  Say Y here to allow nvmap to use physical system memory (i.e.,
 	  shared with the operating system but not translated through
@@ -61,7 +77,7 @@ config NVMAP_ALLOW_SYSMEM
 
 config NVMAP_HIGHMEM_ONLY
 	bool "Use only HIGHMEM for nvmap"
-	depends on TEGRA_NVMAP && (NVMAP_ALLOW_SYSMEM || TEGRA_IOVMM) && HIGHMEM
+	depends on TEGRA_NVMAP && (NVMAP_ALLOW_SYSMEM || TEGRA_IOVMM || IOMMU_API) && HIGHMEM
 	default n
 	help
 	  Say Y here to restrict nvmap system memory allocations (both
@@ -85,6 +101,39 @@ config NVMAP_CARVEOUT_COMPACTOR
 	  heap and retries the failed allocation.
 	  Say Y here to let nvmap to keep carveout fragmentation under control.
 
+config NVMAP_PAGE_POOLS
+	bool "Use page pools to reduce allocation overhead"
+	depends on TEGRA_NVMAP
+	default y
+	help
+	  say Y here to reduce the alloction overhead, which is significant
+	  for uncached, writecombine and inner cacheable memories as it
+	  involves changing page attributes during every allocation per page
+	  and flushing cache. Alloc time is reduced by allcoating the pages
+	  ahead and keeping them aside. The reserved pages would be released
+	  when system is low on memory and acquired back during release of
+	  memory.
+
+config NVMAP_PAGE_POOL_SIZE
+	hex
+	default 0x0
+
+config NVMAP_CACHE_MAINT_BY_SET_WAYS
+	bool "Enable cache maintenance by set/ways"
+	depends on TEGRA_NVMAP
+	help
+	 Say Y here to reduce cache maintenance overhead by MVA.
+	 This helps in reducing cache maintenance overhead in the systems,
+	 where inner cache includes only L1. For the systems, where inner cache
+	 includes L1 and L2, keep this option disabled.
+
+config NVMAP_OUTER_CACHE_MAINT_BY_SET_WAYS
+	bool "Enable outer cache maintenance by set/ways"
+	depends on TEGRA_NVMAP
+	help
+	  Say Y here if you want to optimize cache maintenance for ranges
+	  bigger than size of outer cache. This option has no effect on
+	  system without outer cache.
 
 config NVMAP_VPR
 	bool "Enable VPR Heap."
@@ -94,6 +143,15 @@ config NVMAP_VPR
 	  Say Y here to enable Video Protection Region(VPR) heap.
 	  if unsure, say N.
 
+config NVMAP_FORCE_ZEROED_USER_PAGES
+	bool "Only alloc zeroed pages for user space"
+	depends on TEGRA_NVMAP
+	help
+	  Say Y here to force zeroing of pages allocated for user space. This
+	  avoids leaking kernel secure data to user space. This can add
+	  significant overhead to allocation operations depending on the
+	  allocation size requested.
+
 config TEGRA_DSI
 	bool "Enable DSI panel."
 	default n
@@ -102,7 +160,7 @@ config TEGRA_DSI
 
 config NVMAP_CONVERT_CARVEOUT_TO_IOVMM
 	bool "Convert carveout to IOVMM"
-	depends on TEGRA_NVMAP && TEGRA_IOVMM_SMMU
+	depends on TEGRA_NVMAP &&  (TEGRA_IOVMM_SMMU || IOMMU_API)
 	default y
 	help
 	  Say Y here to force to convert carveout memory requests to

@@ -17,11 +17,14 @@
  *
  */
 
+#include <linux/slab.h>
 #include <linux/pm_runtime.h>
 #include <linux/nvhost.h>
 
+#include "bus.h"
 #include "dev.h"
 
+struct nvhost_bus *nvhost_bus_inst;
 struct nvhost_master *nvhost;
 
 struct resource *nvhost_get_resource(struct nvhost_device *dev,
@@ -72,12 +75,43 @@ int nvhost_get_irq_byname(struct nvhost_device *dev, const char *name)
 }
 EXPORT_SYMBOL_GPL(nvhost_get_irq_byname);
 
+static struct nvhost_device_id *nvhost_bus_match_id(struct nvhost_device *dev,
+	struct nvhost_device_id *id_table)
+{
+	while (id_table->name[0]) {
+		if (strcmp(dev->name, id_table->name) == 0
+				&& dev->version == id_table->version)
+			return id_table;
+		id_table++;
+	}
+	return NULL;
+}
+
+static int nvhost_bus_match(struct device *_dev, struct device_driver *drv)
+{
+	struct nvhost_device *dev = to_nvhost_device(_dev);
+	struct nvhost_driver *ndrv = to_nvhost_driver(drv);
+
+	/* check if driver support multiple devices through id_table */
+	if (ndrv->id_table)
+		return nvhost_bus_match_id(dev, ndrv->id_table) != NULL;
+	else /* driver does not support id_table */
+		return !strcmp(dev->name, drv->name);
+}
+
 static int nvhost_drv_probe(struct device *_dev)
 {
 	struct nvhost_driver *drv = to_nvhost_driver(_dev->driver);
 	struct nvhost_device *dev = to_nvhost_device(_dev);
 
-	return drv->probe(dev);
+	if (drv && drv->probe) {
+		if (drv->id_table)
+			return drv->probe(dev, nvhost_bus_match_id(dev, drv->id_table));
+		else
+			return drv->probe(dev, NULL);
+	}
+	else
+		return -ENODEV;
 }
 
 static int nvhost_drv_remove(struct device *_dev)
@@ -98,7 +132,7 @@ static void nvhost_drv_shutdown(struct device *_dev)
 
 int nvhost_driver_register(struct nvhost_driver *drv)
 {
-	drv->driver.bus = &nvhost_bus_type;
+	drv->driver.bus = &nvhost_bus_inst->nvhost_bus_type;
 	if (drv->probe)
 		drv->driver.probe = nvhost_drv_probe;
 	if (drv->remove)
@@ -116,6 +150,23 @@ void nvhost_driver_unregister(struct nvhost_driver *drv)
 }
 EXPORT_SYMBOL_GPL(nvhost_driver_unregister);
 
+int nvhost_add_devices(struct nvhost_device **devs, int num)
+{
+	int i, ret = 0;
+
+	for (i = 0; i < num; i++) {
+		ret = nvhost_device_register(devs[i]);
+		if (ret) {
+			while (--i >= 0)
+				nvhost_device_unregister(devs[i]);
+			break;
+		}
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(nvhost_add_devices);
+
 int nvhost_device_register(struct nvhost_device *dev)
 {
 	int i, ret = 0;
@@ -129,7 +180,7 @@ int nvhost_device_register(struct nvhost_device *dev)
 	if (!dev->dev.parent && nvhost && nvhost->dev != dev)
 		dev->dev.parent = &nvhost->dev->dev;
 
-	dev->dev.bus = &nvhost_bus_type;
+	dev->dev.bus = &nvhost_bus_inst->nvhost_bus_type;
 
 	if (dev->id != -1)
 		dev_set_name(&dev->dev, "%s.%d", dev->name,  dev->id);
@@ -193,13 +244,6 @@ void nvhost_device_unregister(struct nvhost_device *dev)
 	}
 }
 EXPORT_SYMBOL_GPL(nvhost_device_unregister);
-
-static int nvhost_bus_match(struct device *_dev, struct device_driver *drv)
-{
-	struct nvhost_device *dev = to_nvhost_device(_dev);
-
-	return !strncmp(dev->name, drv->name, strlen(drv->name));
-}
 
 #ifdef CONFIG_PM_SLEEP
 
@@ -528,13 +572,6 @@ static const struct dev_pm_ops nvhost_dev_pm_ops = {
 	.runtime_idle = nvhost_pm_runtime_idle,
 };
 
-struct bus_type nvhost_bus_type = {
-	.name		= "nvhost",
-	.match		= nvhost_bus_match,
-	.pm		= &nvhost_dev_pm_ops,
-};
-EXPORT_SYMBOL(nvhost_bus_type);
-
 static int set_parent(struct device *dev, void *data)
 {
 	struct nvhost_device *ndev = to_nvhost_device(dev);
@@ -549,21 +586,44 @@ int nvhost_bus_add_host(struct nvhost_master *host)
 	nvhost = host;
 
 	/*  Assign host1x as parent to all devices in nvhost bus */
-	bus_for_each_dev(&nvhost_bus_type, NULL, host, set_parent);
+	bus_for_each_dev(&nvhost_bus_inst->nvhost_bus_type, NULL, host, set_parent);
 
 	return 0;
 }
 
+struct nvhost_bus *nvhost_bus_get(void)
+{
+	return nvhost_bus_inst;
+}
 
 int nvhost_bus_init(void)
 {
 	int err;
+	struct nvhost_chip_support *chip_ops;
 
 	pr_info("host1x bus init\n");
 
-	err = bus_register(&nvhost_bus_type);
+	nvhost_bus_inst = kzalloc(sizeof(*nvhost_bus_inst), GFP_KERNEL);
+	if (nvhost_bus_inst == NULL) {
+		pr_err("%s: Cannot allocate nvhost_bus\n", __func__);
+		return -ENOMEM;
+	}
+
+	chip_ops = kzalloc(sizeof(*chip_ops), GFP_KERNEL);
+	if (chip_ops == NULL) {
+		pr_err("%s: Cannot allocate nvhost_chip_support\n", __func__);
+		kfree(nvhost_bus_inst);
+		nvhost_bus_inst = NULL;
+		return -ENOMEM;
+	}
+
+	nvhost_bus_inst->nvhost_bus_type.name = "nvhost";
+	nvhost_bus_inst->nvhost_bus_type.match = nvhost_bus_match;
+	nvhost_bus_inst->nvhost_bus_type.pm = &nvhost_dev_pm_ops;
+	nvhost_bus_inst->nvhost_chip_ops = chip_ops;
+
+	err = bus_register(&nvhost_bus_inst->nvhost_bus_type);
 
 	return err;
 }
 postcore_initcall(nvhost_bus_init);
-

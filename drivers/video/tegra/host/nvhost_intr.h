@@ -71,10 +71,10 @@ struct nvhost_intr {
 	struct nvhost_intr_syncpt *syncpt;
 	struct mutex mutex;
 	int host_general_irq;
+	int host_syncpt_irq_base;
 	bool host_general_irq_requested;
 };
 #define intr_to_dev(x) container_of(x, struct nvhost_master, intr)
-#define intr_op(intr) (intr_to_dev(intr)->op.intr)
 #define intr_syncpt_to_intr(is) (is->intr)
 
 /**
@@ -104,7 +104,7 @@ void *nvhost_intr_alloc_waiter(void);
  * You must call this if you passed non-NULL as ref.
  * @ref the ref returned from nvhost_intr_add_action()
  */
-void nvhost_intr_put_ref(struct nvhost_intr *intr, void *ref);
+void nvhost_intr_put_ref(struct nvhost_intr *intr, u32 id, void *ref);
 
 int nvhost_intr_init(struct nvhost_intr *intr, u32 irq_gen, u32 irq_sync);
 void nvhost_intr_deinit(struct nvhost_intr *intr);

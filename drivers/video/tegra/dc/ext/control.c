@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/ext/control.c
  *
- * Copyright (C) 2011, NVIDIA Corporation
+ * Copyright (c) 2011-2012, NVIDIA CORPORATION, All rights reserved.
  *
  * Author: Robert Morell <rmorell@nvidia.com>
  *
@@ -262,10 +262,7 @@ int tegra_dc_ext_control_init(void)
 		return ret;
 
 	control->dev = device_create(tegra_dc_ext_class,
-				     NULL,
-				     tegra_dc_ext_devno,
-				     NULL,
-				     "tegra_dc_ctrl");
+	     NULL, tegra_dc_ext_devno, NULL, "tegra_dc_ctrl");
 	if (IS_ERR(control->dev)) {
 		ret = PTR_ERR(control->dev);
 		cdev_del(&control->cdev);

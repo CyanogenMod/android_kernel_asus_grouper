@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dc_sysfs.c
  *
- * Copyright (c) 2011, NVIDIA Corporation.
+ * Copyright (c) 2011-2012, NVIDIA CORPORATION, All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -313,6 +313,14 @@ static ssize_t nvdps_store(struct device *dev,
 
 static DEVICE_ATTR(nvdps, S_IRUGO|S_IWUSR, nvdps_show, nvdps_store);
 
+static ssize_t smart_panel_show(struct device *device,
+	struct device_attribute *attr, char  *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "1\n");
+}
+
+static DEVICE_ATTR(smart_panel, S_IRUGO, smart_panel_show, NULL);
+
 void __devexit tegra_dc_remove_sysfs(struct device *dev)
 {
 	struct nvhost_device *ndev = to_nvhost_device(dev);
@@ -332,6 +340,9 @@ void __devexit tegra_dc_remove_sysfs(struct device *dev)
 
 	if (sd_settings)
 		nvsd_remove_sysfs(dev);
+
+	if (dc->out->flags & TEGRA_DC_OUT_ONE_SHOT_MODE)
+		device_remove_file(dev, &dev_attr_smart_panel);
 }
 
 void tegra_dc_create_sysfs(struct device *dev)
@@ -354,6 +365,9 @@ void tegra_dc_create_sysfs(struct device *dev)
 
 	if (sd_settings)
 		error |= nvsd_create_sysfs(dev);
+
+	if (dc->out->flags & TEGRA_DC_OUT_ONE_SHOT_MODE)
+		error |= device_create_file(dev, &dev_attr_smart_panel);
 
 	if (error)
 		dev_err(&ndev->dev, "Failed to create sysfs attributes!\n");

@@ -21,29 +21,19 @@
 #ifndef __NVHOST_CHANNEL_H
 #define __NVHOST_CHANNEL_H
 
-#include "nvhost_cdma.h"
-#include "nvhost_acm.h"
-#include "nvhost_hwctx.h"
-#include "nvhost_job.h"
-
 #include <linux/cdev.h>
 #include <linux/io.h>
+#include "nvhost_cdma.h"
 
-#define NVHOST_MAX_WAIT_CHECKS 256
-#define NVHOST_MAX_GATHERS 512
-#define NVHOST_MAX_HANDLES 1280
-#define NVHOST_MAX_POWERGATE_IDS 2
+#define NVHOST_MAX_WAIT_CHECKS		256
+#define NVHOST_MAX_GATHERS		512
+#define NVHOST_MAX_HANDLES		1280
+#define NVHOST_MAX_POWERGATE_IDS	2
 
 struct nvhost_master;
-struct nvhost_waitchk;
 struct nvhost_device;
-
-struct nvhost_channel_gather {
-	u32 words;
-	phys_addr_t mem;
-	u32 mem_id;
-	int offset;
-};
+struct nvhost_channel;
+struct nvhost_hwctx;
 
 struct nvhost_channel {
 	int refcount;
@@ -60,8 +50,7 @@ struct nvhost_channel {
 	struct nvhost_cdma cdma;
 };
 
-int nvhost_channel_init(
-	struct nvhost_channel *ch,
+int nvhost_channel_init(struct nvhost_channel *ch,
 	struct nvhost_master *dev, int index);
 
 int nvhost_channel_submit(struct nvhost_job *job);
@@ -70,17 +59,19 @@ struct nvhost_channel *nvhost_getchannel(struct nvhost_channel *ch);
 void nvhost_putchannel(struct nvhost_channel *ch, struct nvhost_hwctx *ctx);
 int nvhost_channel_suspend(struct nvhost_channel *ch);
 
-#define channel_cdma_op(ch) (nvhost_get_host(ch->dev)->op.cdma)
-#define channel_op(ch) (nvhost_get_host(ch->dev)->op.channel)
-#define host_channel_op(host) (host->op.channel)
-
-int nvhost_channel_drain_read_fifo(void __iomem *chan_regs,
+int nvhost_channel_drain_read_fifo(struct nvhost_channel *ch,
 			u32 *ptr, unsigned int count, unsigned int *pending);
 
-int nvhost_channel_read_3d_reg(
-	struct nvhost_channel *channel,
+int nvhost_channel_read_3d_reg(struct nvhost_channel *channel,
 	struct nvhost_hwctx *hwctx,
-	u32 offset,
-	u32 *value);
+	u32 offset, u32 *value);
+
+struct nvhost_channel *nvhost_alloc_channel_internal(int chindex,
+	int max_channels, int *current_channel_count);
+
+void nvhost_free_channel_internal(struct nvhost_channel *ch,
+	int *current_channel_count);
+
+int nvhost_channel_save_context(struct nvhost_channel *ch);
 
 #endif

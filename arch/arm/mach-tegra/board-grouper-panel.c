@@ -27,11 +27,12 @@
 #include <linux/pwm_backlight.h>
 #include <asm/atomic.h>
 #include <linux/nvhost.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 #include <mach/irqs.h>
 #include <mach/iomap.h>
 #include <mach/dc.h>
 #include <mach/fb.h>
+#include "tegra3_host1x_devices.h"
 
 #include "board.h"
 #include "board-grouper.h"
@@ -180,6 +181,11 @@ static struct platform_device grouper_backlight_device = {
 		.platform_data = &grouper_backlight_data,
 	},
 };
+
+static int grouper_panel_prepoweroff(void)
+{
+	gpio_set_value(grouper_lvds_shutdown, 0);
+}
 
 static int grouper_panel_postpoweron(void)
 {
@@ -410,7 +416,6 @@ static struct tegra_dc_sd_settings grouper_sd_settings = {
 	.bin_width = -1,
 	.aggressiveness = 1,
 	.phase_in_adjustments = true,
-	.panel_min_brightness = 13,
 	.use_vid_luma = false,
 	/* Default video coefficients */
 	.coeff = {5, 9, 2},
@@ -554,6 +559,7 @@ static struct tegra_dc_out grouper_disp1_out = {
 	.modes		= grouper_panel_modes,
 	.n_modes	= ARRAY_SIZE(grouper_panel_modes),
 
+	.prepoweroff	= grouper_panel_prepoweroff,
 	.enable		= grouper_panel_enable,
 	.disable	= grouper_panel_disable,
 	.postpoweron	= grouper_panel_postpoweron,
@@ -567,7 +573,6 @@ static struct tegra_dc_platform_data grouper_disp1_pdata = {
 	.flags		= TEGRA_DC_FLAG_ENABLED,
 	.default_out	= &grouper_disp1_out,
 	.emc_clk_rate	= 300000000,
-	.min_emc_clk_rate	= 102000000,
 	.fb		= &grouper_fb_data,
 };
 
@@ -755,7 +760,7 @@ int __init grouper_panel_init(void)
 #endif
 
 #ifdef CONFIG_TEGRA_GRHOST
-	err = nvhost_device_register(&tegra_grhost_device);
+	err = tegra3_register_host1x_devices();
 	if (err)
 		return err;
 #endif

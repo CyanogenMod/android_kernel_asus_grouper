@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/ext/tegra_dc_ext_priv.h
  *
- * Copyright (C) 2011, NVIDIA Corporation
+ * Copyright (c) 2011-2012, NVIDIA CORPORATION, All rights reserved.
  *
  * Author: Robert Morell <rmorell@nvidia.com>
  *
@@ -25,7 +25,7 @@
 #include <linux/poll.h>
 
 #include <mach/dc.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 
 #include <video/tegra_dc_ext.h>
 
@@ -58,6 +58,10 @@ struct tegra_dc_ext_win {
 	struct workqueue_struct	*flip_wq;
 
 	atomic_t		nr_pending_flips;
+
+	struct mutex		queue_lock;
+
+	struct list_head	timestamp_queue;
 };
 
 struct tegra_dc_ext {

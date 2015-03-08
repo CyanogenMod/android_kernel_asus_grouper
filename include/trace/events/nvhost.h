@@ -138,7 +138,74 @@ TRACE_EVENT(nvhost_channel_write_cmdbuf,
 	  __entry->words, __entry->offset)
 );
 
-TRACE_EVENT(nvhost_channel_write_cmdbuf_data,
+TRACE_EVENT(nvhost_cdma_end,
+	TP_PROTO(const char *name, int prio,
+		int hi_count, int med_count, int low_count),
+
+	TP_ARGS(name, prio, hi_count, med_count, low_count),
+
+	TP_STRUCT__entry(
+		__field(const char *, name)
+		__field(int, prio)
+		__field(int, hi_count)
+		__field(int, med_count)
+		__field(int, low_count)
+	),
+
+	TP_fast_assign(
+		__entry->name = name;
+		__entry->prio = prio;
+		__entry->hi_count = hi_count;
+		__entry->med_count = med_count;
+		__entry->low_count = low_count;
+	),
+
+	TP_printk("name=%s, prio=%d, hi=%d, med=%d, low=%d",
+		__entry->name, __entry->prio,
+		__entry->hi_count, __entry->med_count, __entry->low_count)
+);
+
+TRACE_EVENT(nvhost_cdma_flush,
+	TP_PROTO(const char *name, int timeout),
+
+	TP_ARGS(name, timeout),
+
+	TP_STRUCT__entry(
+		__field(const char *, name)
+		__field(int, timeout)
+	),
+
+	TP_fast_assign(
+		__entry->name = name;
+		__entry->timeout = timeout;
+	),
+
+	TP_printk("name=%s, timeout=%d",
+		__entry->name, __entry->timeout)
+);
+
+TRACE_EVENT(nvhost_cdma_push,
+	TP_PROTO(const char *name, u32 op1, u32 op2),
+
+	TP_ARGS(name, op1, op2),
+
+	TP_STRUCT__entry(
+		__field(const char *, name)
+		__field(u32, op1)
+		__field(u32, op2)
+	),
+
+	TP_fast_assign(
+		__entry->name = name;
+		__entry->op1 = op1;
+		__entry->op2 = op2;
+	),
+
+	TP_printk("name=%s, op1=%08x, op2=%08x",
+		__entry->name, __entry->op1, __entry->op2)
+);
+
+TRACE_EVENT(nvhost_cdma_push_gather,
 	TP_PROTO(const char *name, u32 mem_id,
 			u32 words, u32 offset, void *cmdbuf),
 
@@ -173,20 +240,30 @@ TRACE_EVENT(nvhost_channel_write_cmdbuf_data,
 );
 
 TRACE_EVENT(nvhost_channel_write_reloc,
-	TP_PROTO(const char *name),
+	TP_PROTO(const char *name, u32 cmdbuf_mem, u32 cmdbuf_offset,
+		u32 target, u32 target_offset),
 
-	TP_ARGS(name),
+	TP_ARGS(name, cmdbuf_mem, cmdbuf_offset, target, target_offset),
 
 	TP_STRUCT__entry(
 		__field(const char *, name)
+		__field(u32, cmdbuf_mem)
+		__field(u32, cmdbuf_offset)
+		__field(u32, target)
+		__field(u32, target_offset)
 	),
 
 	TP_fast_assign(
 		__entry->name = name;
+		__entry->cmdbuf_mem = cmdbuf_mem;
+		__entry->cmdbuf_offset = cmdbuf_offset;
+		__entry->target = target;
+		__entry->target_offset = target_offset;
 	),
 
-	TP_printk("name=%s",
-	  __entry->name)
+	TP_printk("name=%s, cmdbuf_mem=%08x, cmdbuf_offset=%04x, target=%08x, target_offset=%04x",
+	  __entry->name, __entry->cmdbuf_mem, __entry->cmdbuf_offset,
+	  __entry->target, __entry->target_offset)
 );
 
 TRACE_EVENT(nvhost_channel_write_waitchks,
@@ -394,24 +471,32 @@ TRACE_EVENT(nvhost_channel_submitted,
 );
 
 TRACE_EVENT(nvhost_channel_submit_complete,
-	TP_PROTO(const char *name, int count, u32 thresh),
+	TP_PROTO(const char *name, int count, u32 thresh,
+		int hi_count, int med_count, int low_count),
 
-	TP_ARGS(name, count, thresh),
+	TP_ARGS(name, count, thresh, hi_count, med_count, low_count),
 
 	TP_STRUCT__entry(
 		__field(const char *, name)
 		__field(int, count)
 		__field(u32, thresh)
+		__field(int, hi_count)
+		__field(int, med_count)
+		__field(int, low_count)
 	),
 
 	TP_fast_assign(
 		__entry->name = name;
 		__entry->count = count;
 		__entry->thresh = thresh;
+		__entry->hi_count = hi_count;
+		__entry->med_count = med_count;
+		__entry->low_count = low_count;
 	),
 
-	TP_printk("name=%s, count=%d, thresh=%d",
-		__entry->name, __entry->count, __entry->thresh)
+	TP_printk("name=%s, count=%d, thresh=%d, hi=%d, med=%d, low=%d",
+		__entry->name, __entry->count, __entry->thresh,
+		__entry->hi_count, __entry->med_count, __entry->low_count)
 );
 
 TRACE_EVENT(nvhost_wait_cdma,
@@ -430,6 +515,51 @@ TRACE_EVENT(nvhost_wait_cdma,
 	),
 
 	TP_printk("name=%s, event=%d", __entry->name, __entry->eventid)
+);
+
+TRACE_EVENT(nvhost_syncpt_update_min,
+	TP_PROTO(u32 id, u32 val),
+
+	TP_ARGS(id, val),
+
+	TP_STRUCT__entry(
+		__field(u32, id)
+		__field(u32, val)
+	),
+
+	TP_fast_assign(
+		__entry->id = id;
+		__entry->val = val;
+	),
+
+	TP_printk("id=%d, val=%d", __entry->id, __entry->val)
+);
+
+TRACE_EVENT(nvhost_syncpt_wait_check,
+	TP_PROTO(u32 mem_id, u32 offset, u32 syncpt_id, u32 thresh, u32 min),
+
+	TP_ARGS(mem_id, offset, syncpt_id, thresh, min),
+
+	TP_STRUCT__entry(
+		__field(u32, mem_id)
+		__field(u32, offset)
+		__field(u32, syncpt_id)
+		__field(u32, thresh)
+		__field(u32, min)
+	),
+
+	TP_fast_assign(
+		__entry->mem_id = mem_id;
+		__entry->offset = offset;
+		__entry->syncpt_id = syncpt_id;
+		__entry->thresh = thresh;
+		__entry->min = min;
+	),
+
+	TP_printk("mem_id=%08x, offset=%05x, id=%d, thresh=%d, current=%d",
+		__entry->mem_id, __entry->offset,
+		__entry->syncpt_id, __entry->thresh,
+		__entry->min)
 );
 
 #endif /*  _TRACE_NVHOST_H */

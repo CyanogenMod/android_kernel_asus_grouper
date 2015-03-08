@@ -3,7 +3,7 @@
  *
  * Tegra Graphics Host Automatic Clock Management
  *
- * Copyright (c) 2010-2012, NVIDIA Corporation.
+ * Copyright (c) 2010-2012, NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -31,9 +31,9 @@
 #include <mach/clk.h>
 #include <mach/hardware.h>
 
-#define ACM_SUSPEND_WAIT_FOR_IDLE_TIMEOUT (2 * HZ)
-#define POWERGATE_DELAY 10
-#define MAX_DEVID_LENGTH 16
+#define ACM_SUSPEND_WAIT_FOR_IDLE_TIMEOUT	(2 * HZ)
+#define POWERGATE_DELAY 			10
+#define MAX_DEVID_LENGTH			16
 
 DEFINE_MUTEX(client_list_lock);
 
@@ -55,15 +55,8 @@ static void do_unpowergate_locked(int id)
 		tegra_unpowergate_partition(id);
 }
 
-void nvhost_module_reset(struct nvhost_device *dev)
+static void do_module_reset_locked(struct nvhost_device *dev)
 {
-	dev_dbg(&dev->dev,
-		"%s: asserting %s module reset (id %d, id2 %d)\n",
-		__func__, dev->name,
-		dev->powergate_ids[0], dev->powergate_ids[1]);
-
-	mutex_lock(&dev->lock);
-
 	/* assert module and mc client reset */
 	if (dev->powergate_ids[0] != -1) {
 		tegra_powergate_mc_disable(dev->powergate_ids[0]);
@@ -89,7 +82,17 @@ void nvhost_module_reset(struct nvhost_device *dev)
 		tegra_periph_reset_deassert(dev->clk[1]);
 		tegra_powergate_mc_enable(dev->powergate_ids[1]);
 	}
+}
 
+void nvhost_module_reset(struct nvhost_device *dev)
+{
+	dev_dbg(&dev->dev,
+		"%s: asserting %s module reset (id %d, id2 %d)\n",
+		__func__, dev->name,
+		dev->powergate_ids[0], dev->powergate_ids[1]);
+
+	mutex_lock(&dev->lock);
+	do_module_reset_locked(dev);
 	mutex_unlock(&dev->lock);
 
 	dev_dbg(&dev->dev, "%s: module %s out of reset\n",
@@ -98,8 +101,17 @@ void nvhost_module_reset(struct nvhost_device *dev)
 
 static void to_state_clockgated_locked(struct nvhost_device *dev)
 {
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
+
 	if (dev->powerstate == NVHOST_POWER_STATE_RUNNING) {
-		int i;
+		int i, err;
+		if (drv->prepare_clockoff) {
+			err = drv->prepare_clockoff(dev);
+			if (err) {
+				dev_err(&dev->dev, "error clock gating");
+				return;
+			}
+		}
 		for (i = 0; i < dev->num_clks; i++)
 			clk_disable(dev->clk[i]);
 		if (dev->dev.parent)
@@ -108,15 +120,21 @@ static void to_state_clockgated_locked(struct nvhost_device *dev)
 			&& dev->can_powergate) {
 		do_unpowergate_locked(dev->powergate_ids[0]);
 		do_unpowergate_locked(dev->powergate_ids[1]);
+
+		if (dev->powerup_reset)
+			do_module_reset_locked(dev);
 	}
 	dev->powerstate = NVHOST_POWER_STATE_CLOCKGATED;
 }
 
 static void to_state_running_locked(struct nvhost_device *dev)
 {
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
 	int prev_state = dev->powerstate;
+
 	if (dev->powerstate == NVHOST_POWER_STATE_POWERGATED)
 		to_state_clockgated_locked(dev);
+
 	if (dev->powerstate == NVHOST_POWER_STATE_CLOCKGATED) {
 		int i;
 
@@ -132,9 +150,17 @@ static void to_state_running_locked(struct nvhost_device *dev)
 			}
 		}
 
+		/* Invoke callback after enabling clock. This is used for
+		 * re-enabling host1x interrupts. */
+		if (prev_state == NVHOST_POWER_STATE_CLOCKGATED
+				&& drv->finalize_clockon)
+			drv->finalize_clockon(dev);
+
+		/* Invoke callback after power un-gating. This is used for
+		 * restoring context. */
 		if (prev_state == NVHOST_POWER_STATE_POWERGATED
-				&& dev->finalize_poweron)
-			dev->finalize_poweron(dev);
+				&& drv->finalize_poweron)
+			drv->finalize_poweron(dev);
 	}
 	dev->powerstate = NVHOST_POWER_STATE_RUNNING;
 }
@@ -146,12 +172,13 @@ static void to_state_running_locked(struct nvhost_device *dev)
 static int to_state_powergated_locked(struct nvhost_device *dev)
 {
 	int err = 0;
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
 
-	if (dev->prepare_poweroff
+	if (drv->prepare_poweroff
 			&& dev->powerstate != NVHOST_POWER_STATE_POWERGATED) {
 		/* Clock needs to be on in prepare_poweroff */
 		to_state_running_locked(dev);
-		err = dev->prepare_poweroff(dev);
+		err = drv->prepare_poweroff(dev);
 		if (err)
 			return err;
 	}
@@ -183,8 +210,10 @@ static void schedule_clockgating_locked(struct nvhost_device *dev)
 
 void nvhost_module_busy(struct nvhost_device *dev)
 {
-	if (dev->busy)
-		dev->busy(dev);
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
+
+	if (drv->busy)
+		drv->busy(dev);
 
 	mutex_lock(&dev->lock);
 	cancel_delayed_work(&dev->powerstate_down);
@@ -221,9 +250,9 @@ static void powerstate_down_handler(struct work_struct *work)
 	mutex_unlock(&dev->lock);
 }
 
-
 void nvhost_module_idle_mult(struct nvhost_device *dev, int refs)
 {
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
 	bool kick = false;
 
 	mutex_lock(&dev->lock);
@@ -238,8 +267,8 @@ void nvhost_module_idle_mult(struct nvhost_device *dev, int refs)
 	if (kick) {
 		wake_up(&dev->idle_wq);
 
-		if (dev->idle)
-			dev->idle(dev);
+		if (drv->idle)
+			drv->idle(dev);
 	}
 }
 
@@ -331,15 +360,17 @@ void nvhost_module_remove_client(struct nvhost_device *dev, void *priv)
 {
 	int i;
 	struct nvhost_module_client *m;
+	int found = 0;
 
 	mutex_lock(&client_list_lock);
 	list_for_each_entry(m, &dev->client_list, node) {
 		if (priv == m->priv) {
 			list_del(&m->node);
+			found = 1;
 			break;
 		}
 	}
-	if (m) {
+	if (found) {
 		kfree(m);
 		for (i = 0; i < dev->num_clks; i++)
 			nvhost_module_update_rate(dev, i);
@@ -347,9 +378,103 @@ void nvhost_module_remove_client(struct nvhost_device *dev, void *priv)
 	mutex_unlock(&client_list_lock);
 }
 
+static ssize_t refcount_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	int ret;
+	struct nvhost_device_power_attr *power_attribute =
+		container_of(attr, struct nvhost_device_power_attr, \
+			power_attr[NVHOST_POWER_SYSFS_ATTRIB_REFCOUNT]);
+	struct nvhost_device *dev = power_attribute->ndev;
+
+	mutex_lock(&dev->lock);
+	ret = sprintf(buf, "%d\n", dev->refcount);
+	mutex_unlock(&dev->lock);
+
+	return ret;
+}
+
+static ssize_t powergate_delay_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int powergate_delay = 0, ret = 0;
+	struct nvhost_device_power_attr *power_attribute =
+		container_of(attr, struct nvhost_device_power_attr, \
+			power_attr[NVHOST_POWER_SYSFS_ATTRIB_POWERGATE_DELAY]);
+	struct nvhost_device *dev = power_attribute->ndev;
+
+	if (!dev->can_powergate) {
+		dev_info(&dev->dev, "does not support power-gating\n");
+		return count;
+	}
+
+	mutex_lock(&dev->lock);
+	ret = sscanf(buf, "%d", &powergate_delay);
+	if (ret == 1 && powergate_delay >= 0)
+		dev->powergate_delay = powergate_delay;
+	else
+		dev_err(&dev->dev, "Invalid powergate delay\n");
+	mutex_unlock(&dev->lock);
+
+	return count;
+}
+
+static ssize_t powergate_delay_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	int ret;
+	struct nvhost_device_power_attr *power_attribute =
+		container_of(attr, struct nvhost_device_power_attr, \
+			power_attr[NVHOST_POWER_SYSFS_ATTRIB_POWERGATE_DELAY]);
+	struct nvhost_device *dev = power_attribute->ndev;
+
+	mutex_lock(&dev->lock);
+	ret = sprintf(buf, "%d\n", dev->powergate_delay);
+	mutex_unlock(&dev->lock);
+
+	return ret;
+}
+
+static ssize_t clockgate_delay_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int clockgate_delay = 0, ret = 0;
+	struct nvhost_device_power_attr *power_attribute =
+		container_of(attr, struct nvhost_device_power_attr, \
+			power_attr[NVHOST_POWER_SYSFS_ATTRIB_CLOCKGATE_DELAY]);
+	struct nvhost_device *dev = power_attribute->ndev;
+
+	mutex_lock(&dev->lock);
+	ret = sscanf(buf, "%d", &clockgate_delay);
+	if (ret == 1 && clockgate_delay >= 0)
+		dev->clockgate_delay = clockgate_delay;
+	else
+		dev_err(&dev->dev, "Invalid clockgate delay\n");
+	mutex_unlock(&dev->lock);
+
+	return count;
+}
+
+static ssize_t clockgate_delay_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	int ret;
+	struct nvhost_device_power_attr *power_attribute =
+		container_of(attr, struct nvhost_device_power_attr, \
+			power_attr[NVHOST_POWER_SYSFS_ATTRIB_CLOCKGATE_DELAY]);
+	struct nvhost_device *dev = power_attribute->ndev;
+
+	mutex_lock(&dev->lock);
+	ret = sprintf(buf, "%d\n", dev->clockgate_delay);
+	mutex_unlock(&dev->lock);
+
+	return ret;
+}
+
 int nvhost_module_init(struct nvhost_device *dev)
 {
-	int i = 0;
+	int i = 0, err = 0;
+	struct kobj_attribute *attr = NULL;
 
 	/* initialize clocks to known state */
 	INIT_LIST_HEAD(&dev->client_list);
@@ -390,7 +515,71 @@ int nvhost_module_init(struct nvhost_device *dev)
 		dev->powerstate = NVHOST_POWER_STATE_CLOCKGATED;
 	}
 
+	/* Init the power sysfs attributes for this device */
+	dev->power_attrib = kzalloc(sizeof(struct nvhost_device_power_attr),
+		GFP_KERNEL);
+	if (!dev->power_attrib) {
+		dev_err(&dev->dev, "Unable to allocate sysfs attributes\n");
+		return -ENOMEM;
+	}
+	dev->power_attrib->ndev = dev;
+
+	dev->power_kobj = kobject_create_and_add("acm", &dev->dev.kobj);
+	if (!dev->power_kobj) {
+		dev_err(&dev->dev, "Could not add dir 'power'\n");
+		err = -EIO;
+		goto fail_attrib_alloc;
+	}
+
+	attr = &dev->power_attrib->power_attr[NVHOST_POWER_SYSFS_ATTRIB_CLOCKGATE_DELAY];
+	attr->attr.name = "clockgate_delay";
+	attr->attr.mode = S_IWUSR | S_IRUGO;
+	attr->show = clockgate_delay_show;
+	attr->store = clockgate_delay_store;
+	if (sysfs_create_file(dev->power_kobj, &attr->attr)) {
+		dev_err(&dev->dev, "Could not create sysfs attribute clockgate_delay\n");
+		err = -EIO;
+		goto fail_clockdelay;
+	}
+
+	attr = &dev->power_attrib->power_attr[NVHOST_POWER_SYSFS_ATTRIB_POWERGATE_DELAY];
+	attr->attr.name = "powergate_delay";
+	attr->attr.mode = S_IWUSR | S_IRUGO;
+	attr->show = powergate_delay_show;
+	attr->store = powergate_delay_store;
+	if (sysfs_create_file(dev->power_kobj, &attr->attr)) {
+		dev_err(&dev->dev, "Could not create sysfs attribute powergate_delay\n");
+		err = -EIO;
+		goto fail_powergatedelay;
+	}
+
+	attr = &dev->power_attrib->power_attr[NVHOST_POWER_SYSFS_ATTRIB_REFCOUNT];
+	attr->attr.name = "refcount";
+	attr->attr.mode = S_IRUGO;
+	attr->show = refcount_show;
+	if (sysfs_create_file(dev->power_kobj, &attr->attr)) {
+		dev_err(&dev->dev, "Could not create sysfs attribute refcount\n");
+		err = -EIO;
+		goto fail_refcount;
+	}
+
 	return 0;
+
+fail_refcount:
+	attr = &dev->power_attrib->power_attr[NVHOST_POWER_SYSFS_ATTRIB_POWERGATE_DELAY];
+	sysfs_remove_file(dev->power_kobj, &attr->attr);
+
+fail_powergatedelay:
+	attr = &dev->power_attrib->power_attr[NVHOST_POWER_SYSFS_ATTRIB_CLOCKGATE_DELAY];
+	sysfs_remove_file(dev->power_kobj, &attr->attr);
+
+fail_clockdelay:
+	kobject_put(dev->power_kobj);
+
+fail_attrib_alloc:
+	kfree(dev->power_attrib);
+
+	return err;
 }
 
 static int is_module_idle(struct nvhost_device *dev)
@@ -405,6 +594,7 @@ static int is_module_idle(struct nvhost_device *dev)
 int nvhost_module_suspend(struct nvhost_device *dev)
 {
 	int ret;
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
 
 	ret = wait_event_timeout(dev->idle_wq, is_module_idle(dev),
 			ACM_SUSPEND_WAIT_FOR_IDLE_TIMEOUT);
@@ -419,8 +609,8 @@ int nvhost_module_suspend(struct nvhost_device *dev)
 	to_state_powergated_locked(dev);
 	mutex_unlock(&dev->lock);
 
-	if (dev->suspend)
-		dev->suspend(dev);
+	if (drv->suspend_ndev)
+		drv->suspend_ndev(dev);
 
 	return 0;
 }
@@ -428,9 +618,10 @@ int nvhost_module_suspend(struct nvhost_device *dev)
 void nvhost_module_deinit(struct nvhost_device *dev)
 {
 	int i;
+	struct nvhost_driver *drv = to_nvhost_driver(dev->dev.driver);
 
-	if (dev->deinit)
-		dev->deinit(dev);
+	if (drv->deinit)
+		drv->deinit(dev);
 
 	nvhost_module_suspend(dev);
 	for (i = 0; i < dev->num_clks; i++)
@@ -438,3 +629,18 @@ void nvhost_module_deinit(struct nvhost_device *dev)
 	dev->powerstate = NVHOST_POWER_STATE_DEINIT;
 }
 
+/* public host1x power management APIs */
+bool nvhost_module_powered_ext(struct nvhost_device *dev)
+{
+	return nvhost_module_powered(dev);
+}
+
+void nvhost_module_busy_ext(struct nvhost_device *dev)
+{
+	nvhost_module_busy(dev);
+}
+
+void nvhost_module_idle_ext(struct nvhost_device *dev)
+{
+	nvhost_module_idle(dev);
+}

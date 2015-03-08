@@ -60,6 +60,25 @@ struct tegra_camera_block {
 	bool is_enabled;
 };
 
+/*
+ * Declare and define two static variables to provide hint to
+ * gr3d module
+ */
+static int tegra_camera_on;
+static struct tegra_camera_platform_data *pdata;
+
+int is_tegra_camera_on(void)
+{
+	if (pdata) {
+		if (pdata->limit_3d_emc_clk)
+			return tegra_camera_on;
+		else
+			return 0;
+	} else {
+		return 0;
+	}
+}
+
 static int tegra_camera_enable_isp(struct tegra_camera_dev *dev)
 {
 	return clk_enable(dev->isp_clk);
@@ -508,6 +527,7 @@ static int tegra_camera_probe(struct platform_device *pdev)
 	mutex_unlock(&dev->tegra_camera_lock);
 
 	dev->dev = &pdev->dev;
+	pdata = pdev->dev.platform_data;
 
 	/* Get regulator pointer */
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC

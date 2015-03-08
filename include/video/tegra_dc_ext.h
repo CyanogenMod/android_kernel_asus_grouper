@@ -59,6 +59,7 @@
 #define TEGRA_DC_EXT_FLIP_FLAG_INVERT_V	(1 << 1)
 #define TEGRA_DC_EXT_FLIP_FLAG_TILED	(1 << 2)
 #define TEGRA_DC_EXT_FLIP_FLAG_CURSOR	(1 << 3)
+#define TEGRA_DC_EXT_FLIP_FLAG_GLOBAL_ALPHA	(1 << 4)
 
 struct tegra_dc_ext_flip_windowattr {
 	__s32	index;
@@ -91,8 +92,10 @@ struct tegra_dc_ext_flip_windowattr {
 	__u32	buff_id_u;
 	__u32	buff_id_v;
 	__u32	flags;
+	__u8	global_alpha; /* requires TEGRA_DC_EXT_FLIP_FLAG_GLOBAL_ALPHA */
 	/* Leave some wiggle room for future expansion */
-	__u32   pad[5];
+	__u8	pad1[3];
+	__u32   pad2[4];
 };
 
 #define TEGRA_DC_EXT_FLIP_N_WINDOWS	3
@@ -208,6 +211,11 @@ struct tegra_dc_ext_status {
 	__u32 pad[3];
 };
 
+struct tegra_dc_ext_feature {
+	__u32 length;
+	__u32 *entries;
+};
+
 #define TEGRA_DC_EXT_SET_NVMAP_FD \
 	_IOW('D', 0x00, __s32)
 
@@ -243,6 +251,9 @@ struct tegra_dc_ext_status {
 
 #define TEGRA_DC_EXT_SET_LUT \
 	_IOW('D', 0x0A, struct tegra_dc_ext_lut)
+
+#define TEGRA_DC_EXT_GET_FEATURES \
+	_IOW('D', 0x0B, struct tegra_dc_ext_feature)
 
 enum tegra_dc_ext_control_output_type {
 	TEGRA_DC_EXT_DSI,

@@ -30,12 +30,14 @@
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/atomic.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 #include "nvmap_heap.h"
 
 struct nvmap_device;
 struct page;
 struct tegra_iovmm_area;
+
+void _nvmap_handle_free(struct nvmap_handle *h);
 
 #if defined(CONFIG_TEGRA_NVMAP)
 #define nvmap_err(_client, _fmt, ...)				\
@@ -86,7 +88,7 @@ struct nvmap_handle {
 	struct mutex lock;
 };
 
-#define NVMAP_DEFAULT_PAGE_POOL_SIZE 8192
+#ifdef CONFIG_NVMAP_PAGE_POOLS
 #define NVMAP_UC_POOL NVMAP_HANDLE_UNCACHEABLE
 #define NVMAP_WC_POOL NVMAP_HANDLE_WRITE_COMBINE
 #define NVMAP_IWB_POOL NVMAP_HANDLE_INNER_CACHEABLE
@@ -103,11 +105,13 @@ struct nvmap_page_pool {
 };
 
 int nvmap_page_pool_init(struct nvmap_page_pool *pool, int flags);
+#endif
 
 struct nvmap_share {
 	struct tegra_iovmm_client *iovmm;
 	wait_queue_head_t pin_wait;
 	struct mutex pin_lock;
+#ifdef CONFIG_NVMAP_PAGE_POOLS
 	union {
 		struct nvmap_page_pool pools[NVMAP_NUM_POOLS];
 		struct {
@@ -117,6 +121,7 @@ struct nvmap_share {
 			struct nvmap_page_pool wb_pool;
 		};
 	};
+#endif
 #ifdef CONFIG_NVMAP_RECLAIM_UNPINNED_VM
 	struct mutex mru_lock;
 	struct list_head *mru_lists;
@@ -159,7 +164,46 @@ static inline void nvmap_ref_unlock(struct nvmap_client *priv)
 {
 	mutex_unlock(&priv->ref_lock);
 }
-#endif /* CONFIG_TEGRA_NVMAP */
+
+static inline struct nvmap_handle *nvmap_handle_get(struct nvmap_handle *h)
+{
+	if (unlikely(atomic_inc_return(&h->ref) <= 1)) {
+		pr_err("%s: %s getting a freed handle\n",
+			__func__, current->group_leader->comm);
+		if (atomic_read(&h->ref) <= 0)
+			return NULL;
+	}
+	return h;
+}
+
+static inline void nvmap_handle_put(struct nvmap_handle *h)
+{
+	int cnt = atomic_dec_return(&h->ref);
+
+	if (WARN_ON(cnt < 0)) {
+		pr_err("%s: %s put to negative references\n",
+			__func__, current->comm);
+	} else if (cnt == 0)
+		_nvmap_handle_free(h);
+}
+
+static inline pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot)
+{
+	if (h->flags == NVMAP_HANDLE_UNCACHEABLE)
+		return pgprot_noncached(prot);
+	else if (h->flags == NVMAP_HANDLE_WRITE_COMBINE)
+		return pgprot_writecombine(prot);
+	else if (h->flags == NVMAP_HANDLE_INNER_CACHEABLE)
+		return pgprot_inner_writeback(prot);
+	return prot;
+}
+
+#else /* CONFIG_TEGRA_NVMAP */
+struct nvmap_handle *nvmap_handle_get(struct nvmap_handle *h);
+void nvmap_handle_put(struct nvmap_handle *h);
+pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot);
+
+#endif /* !CONFIG_TEGRA_NVMAP */
 
 struct device *nvmap_client_to_device(struct nvmap_client *client);
 
@@ -201,9 +245,6 @@ struct nvmap_handle *nvmap_get_handle_id(struct nvmap_client *client,
 struct nvmap_handle_ref *nvmap_create_handle(struct nvmap_client *client,
 					     size_t size);
 
-struct nvmap_handle_ref *nvmap_duplicate_handle_id(struct nvmap_client *client,
-						   unsigned long id);
-
 int nvmap_alloc_handle_id(struct nvmap_client *client,
 			  unsigned long id, unsigned int heap_mask,
 			  size_t align, unsigned int flags);
@@ -216,50 +257,9 @@ int nvmap_pin_ids(struct nvmap_client *client,
 void nvmap_unpin_ids(struct nvmap_client *priv,
 		     unsigned int nr, const unsigned long *ids);
 
-void _nvmap_handle_free(struct nvmap_handle *h);
-
 int nvmap_handle_remove(struct nvmap_device *dev, struct nvmap_handle *h);
 
 void nvmap_handle_add(struct nvmap_device *dev, struct nvmap_handle *h);
-
-#if defined(CONFIG_TEGRA_NVMAP)
-static inline struct nvmap_handle *nvmap_handle_get(struct nvmap_handle *h)
-{
-	if (unlikely(atomic_inc_return(&h->ref) <= 1)) {
-		pr_err("%s: %s getting a freed handle\n",
-			__func__, current->group_leader->comm);
-		if (atomic_read(&h->ref) <= 0)
-			return NULL;
-	}
-	return h;
-}
-
-static inline void nvmap_handle_put(struct nvmap_handle *h)
-{
-	int cnt = atomic_dec_return(&h->ref);
-
-	if (WARN_ON(cnt < 0)) {
-		pr_err("%s: %s put to negative references\n",
-			__func__, current->comm);
-	} else if (cnt == 0)
-		_nvmap_handle_free(h);
-}
-
-static inline pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot)
-{
-	if (h->flags == NVMAP_HANDLE_UNCACHEABLE)
-		return pgprot_noncached(prot);
-	else if (h->flags == NVMAP_HANDLE_WRITE_COMBINE)
-		return pgprot_writecombine(prot);
-	else if (h->flags == NVMAP_HANDLE_INNER_CACHEABLE)
-		return pgprot_inner_writeback(prot);
-	return prot;
-}
-#else /* CONFIG_TEGRA_NVMAP */
-struct nvmap_handle *nvmap_handle_get(struct nvmap_handle *h);
-void nvmap_handle_put(struct nvmap_handle *h);
-pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot);
-#endif /* !CONFIG_TEGRA_NVMAP */
 
 int is_nvmap_vma(struct vm_area_struct *vma);
 
@@ -268,4 +268,4 @@ struct nvmap_handle_ref *nvmap_alloc_iovm(struct nvmap_client *client,
 
 void nvmap_free_iovm(struct nvmap_client *client, struct nvmap_handle_ref *r);
 
-#endif
+#endif /* __VIDEO_TEGRA_NVMAP_NVMAP_H */
