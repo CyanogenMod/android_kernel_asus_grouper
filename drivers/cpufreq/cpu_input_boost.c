@@ -33,23 +33,35 @@ struct boost_policy {
 	unsigned int boost_ms;
 	unsigned int cpu;
 	unsigned int cpu_boost;
-	struct work_struct boost_work;
 	struct delayed_work restore_work;
 };
 
 static DEFINE_PER_CPU(struct boost_policy, boost_info);
 static struct workqueue_struct *boost_wq;
+static struct work_struct boost_work;
 
 static bool suspended;
 
 static u64 last_input_time;
 #define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
 
+#define NR_CPUS CONFIG_NR_CPUS
+
+/* Boost frequency in kHz */
 static unsigned int input_boost_freq;
 module_param(input_boost_freq, uint, 0644);
 
+/* Boost duration in millsecs */
 static unsigned int input_boost_ms;
 module_param(input_boost_ms, uint, 0644);
+
+/**
+ * Percentage threshold used to boost CPUs (default 30%). A higher
+ * value will cause more CPUs to be boosted -- CPUs are boosted
+ * when ((current_freq/max_freq) * 100) < input_boost_up_threshold
+ */
+static unsigned int input_boost_up_threshold = 30;
+module_param(input_boost_up_threshold, uint, 0644);
 
 static void set_boost(struct boost_policy *b, unsigned int boost)
 {
@@ -60,31 +72,76 @@ static void set_boost(struct boost_policy *b, unsigned int boost)
 	put_online_cpus();
 }
 
-static void boost_all_cpus(unsigned int freq, unsigned int ms)
-{
-	struct boost_policy *b;
-	unsigned int cpu;
-
-	for_each_possible_cpu(cpu) {
-		b = &per_cpu(boost_info, cpu);
-		b->boost_freq = freq;
-		b->boost_ms = ms;
-		queue_work(boost_wq, &b->boost_work);
-	}
-}
-
 static void __cpuinit cpu_boost_main(struct work_struct *work)
 {
-	struct boost_policy *b = container_of(work, struct boost_policy,
-						boost_work);
+	struct boost_policy *b;
+	struct cpufreq_policy *policy;
+	unsigned int cpu, nr_cpus_to_boost = 0, nr_online_cpus = 0;
 
-	cancel_delayed_work_sync(&b->restore_work);
+	/* Num of CPUs to be boosted based on current freq of each online CPU */
+	get_online_cpus();
+	for_each_online_cpu(cpu) {
+		nr_online_cpus++;
 
-	/* Boost must be set from within work context to prevent deadlock. */
-	set_boost(b, BOOST);
+		/* Only allow 2 CPUs to be staged for boosting from here */
+		if (nr_cpus_to_boost < 2) {
+			policy = cpufreq_cpu_get(cpu);
+			if (policy != NULL) {
+				if ((policy->cur * 100 / policy->max) < input_boost_up_threshold)
+					nr_cpus_to_boost++;
+				cpufreq_cpu_put(policy);
+			}
+		}
+	}
 
-	queue_delayed_work(boost_wq, &b->restore_work,
-				msecs_to_jiffies(b->boost_ms));
+	/* Num of CPUs to be boosted based on how many of them are online */
+	switch (nr_online_cpus * 100 / NR_CPUS) {
+	case 0 ... 25:
+		nr_cpus_to_boost += 2;
+		break;
+	case 26 ... 75:
+		nr_cpus_to_boost++;
+		break;
+	}
+
+	if (!nr_cpus_to_boost)
+		goto put_cpus;
+
+	/* Prioritize boosting of online CPUs */
+	for_each_online_cpu(cpu) {
+		b = &per_cpu(boost_info, cpu);
+		b->boost_freq = input_boost_freq;
+		b->boost_ms = input_boost_ms;
+		cancel_delayed_work_sync(&b->restore_work);
+		b->cpu_boost = BOOST;
+		cpufreq_update_policy(b->cpu);
+		queue_delayed_work(boost_wq, &b->restore_work,
+					msecs_to_jiffies(b->boost_ms));
+		nr_cpus_to_boost--;
+		if (cpu == nr_cpus_to_boost)
+			goto put_cpus;
+	}
+
+	/* Boost offline CPUs if we still need to boost more CPUs */
+	for_each_possible_cpu(cpu) {
+		b = &per_cpu(boost_info, cpu);
+
+		/* Only boost CPUs that are not already boosted (offline CPUs) */
+		if (b->cpu_boost == UNBOOST) {
+			b->boost_freq = input_boost_freq;
+			b->boost_ms = input_boost_ms;
+			cancel_delayed_work_sync(&b->restore_work);
+			b->cpu_boost = BOOST;
+			queue_delayed_work(boost_wq, &b->restore_work,
+						msecs_to_jiffies(b->boost_ms));
+			nr_cpus_to_boost--;
+			if (cpu == nr_cpus_to_boost)
+				goto put_cpus;
+		}
+	}
+
+put_cpus:
+	put_online_cpus();
 }
 
 static void __cpuinit cpu_restore_main(struct work_struct *work)
@@ -149,8 +206,6 @@ static struct early_suspend __refdata cpu_boost_early_suspend_handler = {
 static void cpu_boost_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
-	struct boost_policy *b;
-	unsigned int cpu;
 	u64 now;
 
 	if (suspended || !input_boost_freq || !input_boost_ms)
@@ -160,14 +215,10 @@ static void cpu_boost_input_event(struct input_handle *handle, unsigned int type
 	if (now - last_input_time < MIN_INPUT_INTERVAL)
 		return;
 
-	/* exit if boost is pending for any cpu */
-	for_each_possible_cpu(cpu) {
-		b = &per_cpu(boost_info, cpu);
-		if (work_pending(&b->boost_work))
-			return;
-	}
+	if (unlikely(work_pending(&boost_work)))
+		return;
 
-	boost_all_cpus(input_boost_freq, input_boost_ms);
+	queue_work(boost_wq, &boost_work);
 	last_input_time = ktime_to_us(ktime_get());
 }
 
@@ -260,9 +311,10 @@ static int __init cpu_boost_init(void)
 	for_each_possible_cpu(cpu) {
 		b = &per_cpu(boost_info, cpu);
 		b->cpu = cpu;
-		INIT_WORK(&b->boost_work, cpu_boost_main);
 		INIT_DELAYED_WORK(&b->restore_work, cpu_restore_main);
 	}
+
+	INIT_WORK(&boost_work, cpu_boost_main);
 
 	ret = input_register_handler(&cpu_boost_input_handler);
 	if (ret) {
