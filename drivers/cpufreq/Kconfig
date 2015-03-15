@@ -211,6 +211,11 @@ depends on X86
 source "drivers/cpufreq/Kconfig.x86"
 endmenu
 
+config CPU_INPUT_BOOST
+	bool "CPU Input Boost"
+	help
+	  Boost the CPU on touchscreen, touchpad, and keypad input.
+
 menu "ARM CPU frequency scaling drivers"
 depends on ARM
 source "drivers/cpufreq/Kconfig.arm"
