@@ -29,16 +29,13 @@ enum {
 };
 
 struct boost_policy {
-	unsigned int boost_freq;
-	unsigned int boost_ms;
-	unsigned int cpu;
 	unsigned int cpu_boost;
-	struct delayed_work restore_work;
 };
 
 static DEFINE_PER_CPU(struct boost_policy, boost_info);
 static struct workqueue_struct *boost_wq;
 static struct work_struct boost_work;
+static struct delayed_work restore_work;
 
 static bool suspended;
 
@@ -63,12 +60,20 @@ module_param(input_boost_ms, uint, 0644);
 static unsigned int input_boost_up_threshold = 30;
 module_param(input_boost_up_threshold, uint, 0644);
 
-static void set_boost(struct boost_policy *b, unsigned int boost)
+static void cpu_unboost_all(void)
 {
-	b->cpu_boost = boost;
+	struct boost_policy *b;
+	unsigned int cpu;
+
 	get_online_cpus();
-	if (cpu_online(b->cpu))
-		cpufreq_update_policy(b->cpu);
+	for_each_possible_cpu(cpu) {
+		b = &per_cpu(boost_info, cpu);
+		if (b->cpu_boost == BOOST) {
+			b->cpu_boost = UNBOOST;
+			if (cpu_online(cpu))
+				cpufreq_update_policy(cpu);
+		}
+	}
 	put_online_cpus();
 }
 
@@ -110,16 +115,12 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	/* Prioritize boosting of online CPUs */
 	for_each_online_cpu(cpu) {
 		b = &per_cpu(boost_info, cpu);
-		b->boost_freq = input_boost_freq;
-		b->boost_ms = input_boost_ms;
-		cancel_delayed_work_sync(&b->restore_work);
+		cancel_delayed_work_sync(&restore_work);
 		b->cpu_boost = BOOST;
-		cpufreq_update_policy(b->cpu);
-		queue_delayed_work(boost_wq, &b->restore_work,
-					msecs_to_jiffies(b->boost_ms));
+		cpufreq_update_policy(cpu);
 		nr_cpus_to_boost--;
 		if (cpu == nr_cpus_to_boost)
-			goto put_cpus;
+			goto finish_boost;
 	}
 
 	/* Boost offline CPUs if we still need to boost more CPUs */
@@ -128,28 +129,24 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 
 		/* Only boost CPUs that are not already boosted (offline CPUs) */
 		if (b->cpu_boost == UNBOOST) {
-			b->boost_freq = input_boost_freq;
-			b->boost_ms = input_boost_ms;
-			cancel_delayed_work_sync(&b->restore_work);
+			cancel_delayed_work_sync(&restore_work);
 			b->cpu_boost = BOOST;
-			queue_delayed_work(boost_wq, &b->restore_work,
-						msecs_to_jiffies(b->boost_ms));
 			nr_cpus_to_boost--;
 			if (cpu == nr_cpus_to_boost)
-				goto put_cpus;
+				goto finish_boost;
 		}
 	}
 
+finish_boost:
+	queue_delayed_work(boost_wq, &restore_work,
+				msecs_to_jiffies(input_boost_ms));
 put_cpus:
 	put_online_cpus();
 }
 
 static void __cpuinit cpu_restore_main(struct work_struct *work)
 {
-	struct boost_policy *b = container_of(work, struct boost_policy,
-						restore_work.work);
-
-	set_boost(b, UNBOOST);
+	cpu_unboost_all();
 }
 
 static int cpu_do_boost(struct notifier_block *nb, unsigned long val, void *data)
@@ -165,9 +162,10 @@ static int cpu_do_boost(struct notifier_block *nb, unsigned long val, void *data
 		policy->min = policy->cpuinfo.min_freq;
 		break;
 	case BOOST:
-		if (b->boost_freq > policy->max)
-			b->boost_freq = policy->max;
-		policy->min = b->boost_freq;
+		if (input_boost_freq > policy->max)
+			policy->min = policy->max;
+		else
+			policy->min = input_boost_freq;
 		break;
 	}
 
@@ -187,8 +185,8 @@ static void cpu_boost_early_suspend(struct early_suspend *handler)
 
 	for_each_possible_cpu(cpu) {
 		b = &per_cpu(boost_info, cpu);
-		if (cancel_delayed_work_sync(&b->restore_work))
-			set_boost(b, UNBOOST);
+		if (cancel_delayed_work_sync(&restore_work))
+			cpu_unboost_all();
 	}
 }
 
@@ -295,35 +293,28 @@ static struct input_handler cpu_boost_input_handler = {
 
 static int __init cpu_boost_init(void)
 {
-	struct boost_policy *b;
-	unsigned int cpu;
 	int ret;
 
 	boost_wq = alloc_workqueue("cpu_input_boost_wq", WQ_HIGHPRI, 0);
 	if (!boost_wq) {
 		pr_err("Failed to allocate workqueue\n");
 		ret = -EFAULT;
-		goto fail;
+		goto err;
 	}
 
 	cpufreq_register_notifier(&cpu_do_boost_nb, CPUFREQ_POLICY_NOTIFIER);
 
-	for_each_possible_cpu(cpu) {
-		b = &per_cpu(boost_info, cpu);
-		b->cpu = cpu;
-		INIT_DELAYED_WORK(&b->restore_work, cpu_restore_main);
-	}
-
+	INIT_DELAYED_WORK(&restore_work, cpu_restore_main);
 	INIT_WORK(&boost_work, cpu_boost_main);
 
 	ret = input_register_handler(&cpu_boost_input_handler);
 	if (ret) {
 		pr_err("Failed to register input handler, err: %d\n", ret);
-		goto fail;
+		goto err;
 	}
 
 	register_early_suspend(&cpu_boost_early_suspend_handler);
-fail:
+err:
 	return ret;
 }
 late_initcall(cpu_boost_init);
