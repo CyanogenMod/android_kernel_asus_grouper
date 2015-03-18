@@ -67,13 +67,17 @@ static unsigned int boost_level;
 /* Boost duration in millsecs */
 static unsigned int boost_ms;
 
+/* On/off switch */
+static unsigned int enabled;
+module_param(enabled, uint, 0644);
+
 /**
  * Percentage threshold used to boost CPUs (default 30%). A higher
  * value will cause more CPUs to be boosted -- CPUs are boosted
- * when ((current_freq/max_freq) * 100) < input_boost_up_threshold
+ * when ((current_freq/max_freq) * 100) < up_threshold
  */
-static unsigned int input_boost_up_threshold = 30;
-module_param(input_boost_up_threshold, uint, 0644);
+static unsigned int up_threshold = 30;
+module_param(up_threshold, uint, 0644);
 
 static void cpu_unboost_all(void)
 {
@@ -105,7 +109,7 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 		if (num_cpus_to_boost < 2) {
 			policy = cpufreq_cpu_get(cpu);
 			if (policy != NULL) {
-				if ((policy->cur * 100 / policy->max) < input_boost_up_threshold)
+				if ((policy->cur * 100 / policy->max) < up_threshold)
 					num_cpus_to_boost++;
 				cpufreq_cpu_put(policy);
 			}
@@ -237,7 +241,7 @@ static void cpu_boost_input_event(struct input_handle *handle, unsigned int type
 {
 	u64 now;
 
-	if (suspended)
+	if (suspended || !enabled)
 		return;
 
 	now = ktime_to_us(ktime_get());
