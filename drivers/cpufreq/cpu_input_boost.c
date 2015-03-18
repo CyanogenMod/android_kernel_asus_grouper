@@ -65,8 +65,7 @@ static unsigned int boost_factor[3] = {3, 4, 5};
 static unsigned int boost_level;
 
 /* Boost duration in millsecs */
-static unsigned int input_boost_ms;
-module_param(input_boost_ms, uint, 0644);
+static unsigned int boost_ms;
 
 /**
  * Percentage threshold used to boost CPUs (default 30%). A higher
@@ -141,6 +140,9 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	if (NUM_CPUS == 2)
 		boost_level++;
 
+	/* Calculate boost duration */
+	boost_ms = 3000 - ((num_cpus_to_boost * 750) + ((boost_level + 1) * 250));
+
 	cancel_delayed_work_sync(&restore_work);
 
 	/* Prioritize boosting of online CPUs */
@@ -168,7 +170,7 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 
 finish_boost:
 	queue_delayed_work(boost_wq, &restore_work,
-				msecs_to_jiffies(input_boost_ms));
+				msecs_to_jiffies(boost_ms));
 put_online_cpus:
 	put_online_cpus();
 }
@@ -235,7 +237,7 @@ static void cpu_boost_input_event(struct input_handle *handle, unsigned int type
 {
 	u64 now;
 
-	if (suspended || !input_boost_ms)
+	if (suspended)
 		return;
 
 	now = ktime_to_us(ktime_get());
@@ -342,7 +344,7 @@ static int __init cpu_boost_init(void)
 		curr = table[i].frequency - req_freq[b_level];
 		prev = table[i ? i - 1 : 0].frequency - req_freq[b_level];
 
-		if (curr > 0 && prev < 0) {
+		if (!curr || (curr > 0 && prev < 0)) {
 			boost_freq[b_level] = table[i].frequency;
 			b_level++;
 		}
