@@ -213,16 +213,10 @@ static struct notifier_block cpu_do_boost_nb = {
 
 static void cpu_boost_early_suspend(struct early_suspend *handler)
 {
-	struct boost_policy *b;
-	unsigned int cpu;
-
 	suspended = true;
 
-	for_each_possible_cpu(cpu) {
-		b = &per_cpu(boost_info, cpu);
-		if (cancel_delayed_work_sync(&restore_work))
-			cpu_unboost_all();
-	}
+	if (cancel_delayed_work_sync(&restore_work))
+		cpu_unboost_all();
 }
 
 static void __cpuinit cpu_boost_late_resume(struct early_suspend *handler)
