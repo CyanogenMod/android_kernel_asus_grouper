@@ -336,9 +336,6 @@ static int __init cpu_boost_init(void)
 		req_freq[i] = maxfreq * boost_factor[i] / BOOST_FACTOR_DIVISOR;
 
 	for (i = 0;; i++) {
-		if (table[i].frequency == CPUFREQ_ENTRY_INVALID)
-			continue;
-
 		curr = table[i].frequency - req_freq[b_level];
 		prev = table[i ? i - 1 : 0].frequency - req_freq[b_level];
 
