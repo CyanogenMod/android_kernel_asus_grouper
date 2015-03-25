@@ -16,7 +16,6 @@
 #include <linux/cpu.h>
 #include <linux/cpufreq.h>
 #include <linux/earlysuspend.h>
-#include <linux/hrtimer.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -45,10 +44,8 @@ static struct workqueue_struct *boost_wq;
 static struct work_struct boost_work;
 static struct delayed_work restore_work;
 
+static bool boost_running;
 static bool suspended;
-
-static u64 last_input_time;
-#define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
 
 #define NUM_CPUS CONFIG_NR_CPUS
 
@@ -94,6 +91,7 @@ static void cpu_unboost_all(void)
 		}
 	}
 	put_online_cpus();
+	boost_running = false;
 }
 
 static void __cpuinit cpu_boost_main(struct work_struct *work)
@@ -127,7 +125,7 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	}
 
 	if (!num_cpus_to_boost)
-		goto put_online_cpus;
+		goto finish_boost;
 
 	/* Boost freq to use based on how many CPUs to boost */
 	switch (num_cpus_to_boost * 100 / NUM_CPUS) {
@@ -146,8 +144,6 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 
 	/* Calculate boost duration */
 	boost_ms = 3000 - ((num_cpus_to_boost * 750) + ((boost_level + 1) * 250));
-
-	cancel_delayed_work_sync(&restore_work);
 
 	/* Prioritize boosting of online CPUs */
 	for_each_online_cpu(cpu) {
@@ -173,10 +169,10 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	}
 
 finish_boost:
-	queue_delayed_work(boost_wq, &restore_work,
-				msecs_to_jiffies(boost_ms));
-put_online_cpus:
 	put_online_cpus();
+	if (num_cpus_to_boost)
+		queue_delayed_work(boost_wq, &restore_work,
+					msecs_to_jiffies(boost_ms));
 }
 
 static void __cpuinit cpu_restore_main(struct work_struct *work)
@@ -233,20 +229,11 @@ static struct early_suspend __refdata cpu_boost_early_suspend_handler = {
 static void cpu_boost_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
-	u64 now;
-
-	if (suspended || !enabled)
+	if (boost_running || !enabled || suspended)
 		return;
 
-	now = ktime_to_us(ktime_get());
-	if (now - last_input_time < MIN_INPUT_INTERVAL)
-		return;
-
-	if (unlikely(work_pending(&boost_work)))
-		return;
-
+	boost_running = true;
 	queue_work(boost_wq, &boost_work);
-	last_input_time = ktime_to_us(ktime_get());
 }
 
 static int cpu_boost_input_connect(struct input_handler *handler,
@@ -325,7 +312,7 @@ static int __init cpu_boost_init(void)
 	struct cpufreq_frequency_table *table = cpufreq_frequency_get_table(0);
 	int maxfreq = cpufreq_quick_get_max(0);
 	int b_level = 0, req_freq[3];
-	int curr, prev, i, ret = 0;
+	int curr, prev, i, ret = 1;
 
 	if (!maxfreq) {
 		pr_err("Failed to get max freq, input boost disabled\n");
@@ -348,7 +335,7 @@ static int __init cpu_boost_init(void)
 			break;
 	}
 
-	boost_wq = alloc_workqueue("cpu_input_boost_wq", WQ_HIGHPRI, 0);
+	boost_wq = alloc_workqueue("cpu_input_boost_wq", WQ_HIGHPRI | WQ_NON_REENTRANT, 0);
 	if (!boost_wq) {
 		pr_err("Failed to allocate workqueue\n");
 		ret = -EFAULT;
