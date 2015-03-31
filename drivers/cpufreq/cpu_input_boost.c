@@ -173,6 +173,8 @@ finish_boost:
 	if (num_cpus_to_boost)
 		queue_delayed_work(boost_wq, &restore_work,
 					msecs_to_jiffies(boost_ms));
+	else
+		boost_running = false;
 }
 
 static void __cpuinit cpu_restore_main(struct work_struct *work)
