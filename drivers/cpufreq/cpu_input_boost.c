@@ -22,21 +22,19 @@
 #include <linux/notifier.h>
 #include <linux/slab.h>
 
-/* Boost state */
-enum {
+enum boost_status {
 	UNBOOST,
 	BOOST,
 };
 
-/* Boost level */
-enum {
+enum boost_pwr {
 	LOW,
 	MID,
 	HIGH,
 };
 
 struct boost_policy {
-	unsigned int boost_state;
+	enum boost_status boost_state;
 };
 
 static DEFINE_PER_CPU(struct boost_policy, boost_info);
@@ -59,7 +57,7 @@ static unsigned int boost_factor[3] = {3, 4, 5};
 #define BOOST_FACTOR_DIVISOR 7
 
 /* Boost-freq level to use (high, mid, low) */
-static unsigned int boost_level;
+static enum boost_pwr boost_level;
 
 /* Boost duration in millsecs */
 static unsigned int boost_ms;
@@ -124,8 +122,12 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 		break;
 	}
 
-	if (!num_cpus_to_boost)
-		goto finish_boost;
+	/* Nothing to boost */
+	if (!num_cpus_to_boost) {
+		put_online_cpus();
+		boost_running = false;
+		return;
+	}
 
 	/* Boost freq to use based on how many CPUs to boost */
 	switch (num_cpus_to_boost * 100 / NUM_CPUS) {
@@ -139,6 +141,7 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 		boost_level = LOW;
 	}
 
+	/* Dual-core systems need more power */
 	if (NUM_CPUS == 2)
 		boost_level++;
 
@@ -170,11 +173,8 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 
 finish_boost:
 	put_online_cpus();
-	if (num_cpus_to_boost)
-		queue_delayed_work(boost_wq, &restore_work,
-					msecs_to_jiffies(boost_ms));
-	else
-		boost_running = false;
+	queue_delayed_work(boost_wq, &restore_work,
+				msecs_to_jiffies(boost_ms));
 }
 
 static void __cpuinit cpu_restore_main(struct work_struct *work)
@@ -231,7 +231,11 @@ static struct early_suspend __refdata cpu_boost_early_suspend_handler = {
 static void cpu_boost_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
-	if (boost_running || !enabled || suspended)
+	if (boost_running)
+		return;
+	if (!enabled)
+		return;
+	if (suspended)
 		return;
 
 	boost_running = true;
