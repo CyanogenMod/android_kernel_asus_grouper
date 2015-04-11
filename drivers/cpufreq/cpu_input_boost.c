@@ -105,14 +105,14 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	/* Num of CPUs to be boosted based on current freq of each online CPU */
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
-		/* Only allow 2 CPUs to be staged for boosting from here */
-		if (num_cpus_to_boost < 2) {
-			policy = cpufreq_cpu_get(cpu);
-			if (policy != NULL) {
-				if ((policy->cur * 100 / policy->max) < up_threshold)
-					num_cpus_to_boost++;
-				cpufreq_cpu_put(policy);
-			}
+		policy = cpufreq_cpu_get(cpu);
+		if (policy != NULL) {
+			if ((policy->cur * 100 / policy->max) < up_threshold)
+				num_cpus_to_boost++;
+			cpufreq_cpu_put(policy);
+			/* Only allow 2 CPUs to be staged for boosting from here */
+			if (num_cpus_to_boost == 2)
+				break;
 		}
 	}
 
