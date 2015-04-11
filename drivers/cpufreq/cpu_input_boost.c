@@ -16,6 +16,7 @@
 #include <linux/cpu.h>
 #include <linux/cpufreq.h>
 #include <linux/earlysuspend.h>
+#include <linux/hrtimer.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -44,6 +45,9 @@ static struct delayed_work restore_work;
 
 static bool boost_running;
 static bool suspended;
+
+static u64 last_input_time;
+#define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
 
 #define NUM_CPUS CONFIG_NR_CPUS
 
@@ -161,8 +165,6 @@ static void __cpuinit cpu_boost_main(struct work_struct *work)
 	/* Boost offline CPUs if we still need to boost more CPUs */
 	for_each_possible_cpu(cpu) {
 		b = &per_cpu(boost_info, cpu);
-
-		/* Only boost CPUs that are not already boosted (offline CPUs) */
 		if (b->boost_state == UNBOOST) {
 			b->boost_state = BOOST;
 			num_cpus_boosted++;
@@ -231,6 +233,8 @@ static struct early_suspend __refdata cpu_boost_early_suspend_handler = {
 static void cpu_boost_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
+	u64 now;
+
 	if (boost_running)
 		return;
 	if (!enabled)
@@ -238,8 +242,13 @@ static void cpu_boost_input_event(struct input_handle *handle, unsigned int type
 	if (suspended)
 		return;
 
+	now = ktime_to_us(ktime_get());
+	if (now - last_input_time < MIN_INPUT_INTERVAL)
+		return;
+
 	boost_running = true;
 	queue_work(boost_wq, &boost_work);
+	last_input_time = ktime_to_us(ktime_get());
 }
 
 static int cpu_boost_input_connect(struct input_handler *handler,
