@@ -67,7 +67,7 @@ static enum boost_pwr boost_level;
 static unsigned int boost_ms;
 
 /* On/off switch */
-static unsigned int enabled;
+static unsigned int enabled = 1;
 module_param(enabled, uint, 0644);
 
 /**
