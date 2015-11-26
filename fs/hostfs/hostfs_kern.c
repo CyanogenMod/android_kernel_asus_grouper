@@ -250,7 +250,6 @@ static void hostfs_evict_inode(struct inode *inode)
 static void hostfs_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
-	INIT_LIST_HEAD(&inode->i_dentry);
 	kfree(HOSTFS_I(inode));
 }
 
@@ -552,7 +551,7 @@ static int read_name(struct inode *ino, char *name)
 	return 0;
 }
 
-int hostfs_create(struct inode *dir, struct dentry *dentry, int mode,
+int hostfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		  struct nameidata *nd)
 {
 	struct inode *inode;
@@ -677,7 +676,7 @@ int hostfs_symlink(struct inode *ino, struct dentry *dentry, const char *to)
 	return err;
 }
 
-int hostfs_mkdir(struct inode *ino, struct dentry *dentry, int mode)
+int hostfs_mkdir(struct inode *ino, struct dentry *dentry, umode_t mode)
 {
 	char *file;
 	int err;
@@ -701,7 +700,7 @@ int hostfs_rmdir(struct inode *ino, struct dentry *dentry)
 	return err;
 }
 
-int hostfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
+static int hostfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode *inode;
 	char *name;
@@ -999,6 +998,7 @@ static struct file_system_type hostfs_type = {
 	.kill_sb	= hostfs_kill_sb,
 	.fs_flags 	= 0,
 };
+MODULE_ALIAS_FS("hostfs");
 
 static int __init init_hostfs(void)
 {

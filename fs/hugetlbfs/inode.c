@@ -500,7 +500,7 @@ static struct inode *hugetlbfs_get_inode(struct super_block *sb, uid_t uid,
  * File creation. Allocate an inode, and we're done..
  */
 static int hugetlbfs_mknod(struct inode *dir,
-			struct dentry *dentry, int mode, dev_t dev)
+			struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode *inode;
 	int error = -ENOSPC;
@@ -523,7 +523,7 @@ static int hugetlbfs_mknod(struct inode *dir,
 	return error;
 }
 
-static int hugetlbfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+static int hugetlbfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int retval = hugetlbfs_mknod(dir, dentry, mode | S_IFDIR, 0);
 	if (!retval)
@@ -531,7 +531,7 @@ static int hugetlbfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	return retval;
 }
 
-static int hugetlbfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd)
+static int hugetlbfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, struct nameidata *nd)
 {
 	return hugetlbfs_mknod(dir, dentry, mode | S_IFREG, 0);
 }
@@ -667,7 +667,6 @@ static struct inode *hugetlbfs_alloc_inode(struct super_block *sb)
 static void hugetlbfs_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
-	INIT_LIST_HEAD(&inode->i_dentry);
 	kmem_cache_free(hugetlbfs_inode_cachep, HUGETLBFS_I(inode));
 }
 

@@ -677,6 +677,14 @@ config SWP_EMULATE
 
 	  If unsure, say Y.
 
+config DIV_EMULATE
+	bool "Emulate SDIV/UDIV instructions"
+	default y
+	help
+	  Emulate SDIV/UDIV that are not present in some ARMv7-A CPUs
+
+	  If unsure, say Y.
+
 config CPU_BIG_ENDIAN
 	bool "Build big-endian kernel"
 	depends on ARCH_SUPPORTS_BIG_ENDIAN
