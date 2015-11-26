@@ -267,7 +267,7 @@ out:
  */
 static int
 ecryptfs_create(struct inode *directory_inode, struct dentry *ecryptfs_dentry,
-		int mode, struct nameidata *nd)
+		umode_t mode, struct nameidata *nd)
 {
 	struct inode *ecryptfs_inode;
 	int rc;
@@ -559,7 +559,7 @@ out_lock:
 	return rc;
 }
 
-static int ecryptfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+static int ecryptfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int rc;
 	struct dentry *lower_dentry;
@@ -607,7 +607,7 @@ static int ecryptfs_rmdir(struct inode *dir, struct dentry *dentry)
 }
 
 static int
-ecryptfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
+ecryptfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	int rc;
 	struct dentry *lower_dentry;

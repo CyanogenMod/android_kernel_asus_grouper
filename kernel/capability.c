@@ -323,7 +323,33 @@ bool has_ns_capability(struct task_struct *t,
 }
 
 /**
- * has_capability_noaudit - Does a task have a capability (unaudited)
+ * has_ns_capability_noaudit - Does a task have a capability (unaudited)
+ * in a specific user ns.
+ * @t: The task in question
+ * @ns: target user namespace
+ * @cap: The capability to be tested for
+ *
+ * Return true if the specified task has the given superior capability
+ * currently in effect to the specified user namespace, false if not.
+ * Do not write an audit message for the check.
+ *
+ * Note that this does not set PF_SUPERPRIV on the task.
+ */
+bool has_ns_capability_noaudit(struct task_struct *t,
+			       struct user_namespace *ns, int cap)
+{
+	int ret;
+
+	rcu_read_lock();
+	ret = security_capable_noaudit(__task_cred(t), ns, cap);
+	rcu_read_unlock();
+
+	return (ret == 0);
+}
+
+/**
+ * has_capability_noaudit - Does a task have a capability (unaudited) in the
+ * initial user ns
  * @t: The task in question
  * @cap: The capability to be tested for
  *
@@ -335,9 +361,7 @@ bool has_ns_capability(struct task_struct *t,
  */
 bool has_capability_noaudit(struct task_struct *t, int cap)
 {
-	int ret = security_real_capable_noaudit(t, &init_user_ns, cap);
-
-	return (ret == 0);
+	return has_ns_capability_noaudit(t, &init_user_ns, cap);
 }
 
 /**
@@ -395,6 +419,7 @@ bool task_ns_capable(struct task_struct *t, int cap)
 	return ns_capable(task_cred_xxx(t, user)->user_ns, cap);
 }
 EXPORT_SYMBOL(task_ns_capable);
+
 
 /**
  * nsown_capable - Check superior capability to one's own user_ns

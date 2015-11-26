@@ -30,15 +30,15 @@ static void ncp_do_readdir(struct file *, void *, filldir_t,
 
 static int ncp_readdir(struct file *, void *, filldir_t);
 
-static int ncp_create(struct inode *, struct dentry *, int, struct nameidata *);
+static int ncp_create(struct inode *, struct dentry *, umode_t, struct nameidata *);
 static struct dentry *ncp_lookup(struct inode *, struct dentry *, struct nameidata *);
 static int ncp_unlink(struct inode *, struct dentry *);
-static int ncp_mkdir(struct inode *, struct dentry *, int);
+static int ncp_mkdir(struct inode *, struct dentry *, umode_t);
 static int ncp_rmdir(struct inode *, struct dentry *);
 static int ncp_rename(struct inode *, struct dentry *,
 	  	      struct inode *, struct dentry *);
 static int ncp_mknod(struct inode * dir, struct dentry *dentry,
-		     int mode, dev_t rdev);
+		     umode_t mode, dev_t rdev);
 #if defined(CONFIG_NCPFS_EXTRAS) || defined(CONFIG_NCPFS_NFS_NS)
 extern int ncp_symlink(struct inode *, struct dentry *, const char *);
 #else
@@ -979,13 +979,13 @@ out:
 	return error;
 }
 
-static int ncp_create(struct inode *dir, struct dentry *dentry, int mode,
+static int ncp_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		struct nameidata *nd)
 {
 	return ncp_create_new(dir, dentry, mode, 0, 0);
 }
 
-static int ncp_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+static int ncp_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct ncp_entry_info finfo;
 	struct ncp_server *server = NCP_SERVER(dir);
@@ -1201,12 +1201,12 @@ out:
 }
 
 static int ncp_mknod(struct inode * dir, struct dentry *dentry,
-		     int mode, dev_t rdev)
+		     umode_t mode, dev_t rdev)
 {
 	if (!new_valid_dev(rdev))
 		return -EINVAL;
 	if (ncp_is_nfs_extras(NCP_SERVER(dir), NCP_FINFO(dir)->volNumber)) {
-		DPRINTK(KERN_DEBUG "ncp_mknod: mode = 0%o\n", mode);
+		DPRINTK(KERN_DEBUG "ncp_mknod: mode = 0%ho\n", mode);
 		return ncp_create_new(dir, dentry, mode, rdev, 0);
 	}
 	return -EPERM; /* Strange, but true */
