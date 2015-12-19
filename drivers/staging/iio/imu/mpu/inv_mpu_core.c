@@ -45,9 +45,7 @@
 
 s64 get_time_ns(void)
 {
-	struct timespec ts;
-	ktime_get_ts(&ts);
-	return timespec_to_ns(&ts);
+	return ktime_to_ns(ktime_get_boottime());
 }
 
 static const short AKM8975_ST_Lower[3] = {-100, -100, -1000};
