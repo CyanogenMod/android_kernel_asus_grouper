@@ -1717,7 +1717,6 @@ int security_inode_init_security(struct inode *inode, struct inode *dir,
 int security_old_inode_init_security(struct inode *inode, struct inode *dir,
 				     const struct qstr *qstr, char **name,
 				     void **value, size_t *len);
-int security_inode_create(struct inode *dir, struct dentry *dentry, int mode);
 int security_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode);
 int security_inode_link(struct dentry *old_dentry, struct inode *dir,
 			 struct dentry *new_dentry);
