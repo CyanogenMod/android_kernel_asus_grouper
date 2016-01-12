@@ -38,6 +38,11 @@
 #include "pm-irq.h"
 MODULE_LICENSE("GPL");
 
+static unsigned int bb_timeout = 0;
+module_param(bb_timeout, uint, 0644);
+
+int bb_timeout_val;
+
 unsigned long modem_ver = XMM_MODEM_VER_1130;
 EXPORT_SYMBOL(modem_ver);
 
