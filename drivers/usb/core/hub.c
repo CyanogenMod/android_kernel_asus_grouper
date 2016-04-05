@@ -38,7 +38,7 @@
 #endif
 
 extern int use_hsic_controller(struct usb_hcd *hcd);
-extern bool resume_from_l3;
+const bool resume_from_l3 = false;
 
 struct usb_hub {
 	struct device		*intfdev;	/* the "interface" device */

@@ -2331,7 +2331,7 @@ static int uhsic_phy_power_on(struct tegra_usb_phy *phy, bool is_dpd)
 #endif
 
 	if (uhsic_config->enable_gpio != -1) {
-		baseband_xmm_enable_hsic_power(1);
+		// baseband_xmm_enable_hsic_power(1);
 		gpio_set_value_cansleep(uhsic_config->enable_gpio, 1);
 		/* keep hsic reset asserted for 1 ms */
 		udelay(1000);
@@ -2465,7 +2465,7 @@ static int uhsic_phy_power_off(struct tegra_usb_phy *phy, bool is_dpd)
 		gpio_set_value_cansleep(uhsic_config->enable_gpio, 0);
 		/* keep hsic reset de-asserted for 1 ms */
 		udelay(1000);
-		baseband_xmm_enable_hsic_power(0);
+		// baseband_xmm_enable_hsic_power(0);
 	}
 	if (uhsic_config->post_phy_off && uhsic_config->post_phy_off())
 		return -EAGAIN;

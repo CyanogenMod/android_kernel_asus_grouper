@@ -57,7 +57,6 @@
 #define USB2_PREFETCH_ID               18
 #define USB3_PREFETCH_ID               17
 
-extern void baseband_xmm_L3_resume_check(void);
 static struct usb_hcd *modem_ehci_handle;
 
 struct tegra_ehci_hcd {
@@ -1280,10 +1279,6 @@ static int tegra_ehci_resume(struct platform_device *pdev)
 	struct tegra_ehci_hcd *tegra = platform_get_drvdata(pdev);
 	struct usb_hcd *hcd = ehci_to_hcd(tegra->ehci);
 	int ret;
-	u32 project_info = grouper_get_project_id();
-
-	if (project_info == GROUPER_PROJECT_NAKASI_3G)
-		baseband_xmm_L3_resume_check();
 
 	mutex_lock(&tegra->tegra_ehci_hcd_mutex);
 	if ((tegra->bus_suspended) && (tegra->power_down_on_bus_suspend)) {
