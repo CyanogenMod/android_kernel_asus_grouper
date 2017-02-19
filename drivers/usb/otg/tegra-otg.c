@@ -5,6 +5,7 @@
  *
  * Copyright (C) 2010 NVIDIA Corp.
  * Copyright (C) 2010 Google, Inc.
+ * Copyright (C) 2013 Timur Mehrvarz
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -42,6 +43,8 @@
 #define  USB_VBUS_INT_STATUS	(1 << 9)
 #define  USB_VBUS_STATUS	(1 << 10)
 #define  USB_INTS		(USB_VBUS_INT_STATUS | USB_ID_INT_STATUS)
+
+extern volatile int smb347_deep_sleep;  // tmtmtm: from smb347-charger.c
 
 typedef void (*callback_t)(enum usb_otg_state to,
 				enum usb_otg_state from, void *args);
@@ -230,21 +233,30 @@ static void irq_work(struct work_struct *work)
 		dev_info(tegra->otg.dev, "%s --> %s\n", tegra_state_name(from),
 					      tegra_state_name(to));
 
-		if (tegra->charger_cb)
-			tegra->charger_cb(to, from, tegra->charger_cb_data);
-
+		// tmtmtm
+        smb347_deep_sleep = 0;
 		if (to == OTG_STATE_A_SUSPEND) {
-			if (from == OTG_STATE_A_HOST)
+			if (from == OTG_STATE_A_HOST) {
+				if (tegra->charger_cb) {
+					tegra->charger_cb(to, from, tegra->charger_cb_data); // smb347_otg_status()
+				}
 				tegra_stop_host(tegra);
+			}
 			else if (from == OTG_STATE_B_PERIPHERAL && otg->gadget)
 				usb_gadget_vbus_disconnect(otg->gadget);
 		} else if (to == OTG_STATE_B_PERIPHERAL && otg->gadget) {
 			if (from == OTG_STATE_A_SUSPEND)
 				usb_gadget_vbus_connect(otg->gadget);
 		} else if (to == OTG_STATE_A_HOST) {
-			if (from == OTG_STATE_A_SUSPEND)
-			tegra_start_host(tegra);
+			//if (from != OTG_STATE_A_HOST)
+			if (from == OTG_STATE_A_SUSPEND) {
+				if (tegra->charger_cb) {
+					tegra->charger_cb(to, from, tegra->charger_cb_data); // smb347_otg_status()
+				}
+			    tegra_start_host(tegra);
+            }
 		}
+        dev_info(tegra->otg.dev, "done\n");
 	}
 
 

@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Google, Inc.
  * Copyright (C) 2009 - 2011 NVIDIA Corporation
+ * Copyright (C) 2013 Timur Mehrvarz
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -58,6 +59,7 @@
 #define USB3_PREFETCH_ID               17
 
 extern void baseband_xmm_L3_resume_check(void);
+extern volatile int smb347_deep_sleep;  // tmtmtm: from smb347-charger.c
 static struct usb_hcd *modem_ehci_handle;
 
 struct tegra_ehci_hcd {
@@ -219,9 +221,13 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 		}
 		else if (tegra->bus_suspended &&
 				tegra->port_speed > TEGRA_USB_PHY_PORT_SPEED_HIGH) {
-			printk("%s: no device connected before suspend\n", __func__);
+		  if(smb347_deep_sleep) {
+    	    printk("ehci-tegra %s wake-up/OTG-UNPLUG with smb347_deep_sleep: special\n", __func__);
+    	    // fix: skip default return
+    	  } else {
 			spin_unlock(&ehci->lock);
 			return 0;
+		  }
 		}
 		spin_unlock(&ehci->lock);
 	}
@@ -608,9 +614,13 @@ static int tegra_usb_resume(struct usb_hcd *hcd, bool is_dpd)
 	tegra_ehci_power_up(hcd, is_dpd);
 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 
+    if(smb347_deep_sleep) {
+        printk("ehci-tegra %s wake-up/OTG-PLUG with smb347_deep_sleep: special\n", __func__);
+	} else
 	if ((tegra->port_speed > TEGRA_USB_PHY_PORT_SPEED_HIGH) || (hsic) ||
-	    (null_ulpi))
+	    (null_ulpi)) {
 		goto restart;
+	}
 
 	/* Force the phy to keep data lines in suspend state */
 	tegra_ehci_phy_restore_start(tegra->phy, tegra->port_speed);
